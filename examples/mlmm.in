@@ -18,7 +18,7 @@ Example QM/MM MD with amber-mlips
   spin=1,
   qm_theory="uma",
   ml_keywords="--model uma-s-1p1",
-  mlcut=12.0,
+  qmcut=12.0,
   qmshake=0,
   qm_pme=0,
   printcharges=1,

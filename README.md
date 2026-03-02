@@ -1,11 +1,44 @@
 # amber-mlips
 
-`amber-mlips` is a single-command wrapper for AMBER QM/MM using MLIP backends through `qm_theory=EXTERN` + `&genmpi`.
+MLIP (Machine Learning Interatomic Potential) plugins for **AMBER QM/MM** through
+`qm_theory='EXTERN'` + `&genmpi`, exposed as a single `sander`-style command.
 
-## Usage
+Four model families are currently supported:
+- **UMA** (fairchem) — default model: `uma-s-1p1`
+- **ORB** (orb-models) — default model: `orb-v3-conservative-omol`
+- **MACE** (mace) — default model: `small`
+- **AIMNet2** (aimnet) — default model: `aimnet2`
 
-Run with sander-style flags:
+The wrapper starts an internal model server automatically, transforms AMBER input internally, runs AMBER, then shuts the server down.
 
+Requires **Python 3.9+** and an AMBER installation with `sander`/`sander.MPI`.
+
+## Quick Start
+
+1. Install PyTorch suitable for your CUDA/runtime.
+```bash
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+```
+
+2. Install `amber-mlips` with your backend profile.
+```bash
+pip install "amber-mlips[uma]"
+```
+For ORB/MACE/AIMNet2, use `amber-mlips[orb]`, `amber-mlips[mace]`, `amber-mlips[aimnet2]`.
+
+3. Prepare your AMBER input (`mlmm.in`) with plugin-style `&qmmm` fields:
+```text
+&qmmm
+  qmmask="@1,2,3",
+  qmcharge=0,
+  spin=1,
+  qm_theory="uma",
+  ml_keywords="--model uma-s-1p1",
+  qmcut=12.0,
+/
+```
+
+4. Run with standard `sander` flags:
 ```bash
 amber-mlips -O \
   -i mlmm.in \
@@ -14,104 +47,110 @@ amber-mlips -O \
   -c md.rst7 \
   -r mlmm.rst7 \
   -ref leap.parm7 \
-  -x mlmm.crd \
+  -x mlmm.nc \
   -inf mlmm.info
 ```
 
-## User mdin (`&qmmm`)
+MM CPU-side MPI parallelism:
+```bash
+amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7
+```
+`--mm-ranks` changes only the `sander.MPI` rank count.
+The internal ML server is always launched with 1 rank.
 
-In your input file, set:
+## Input Style (User View)
 
-```text
-&qmmm
-  qmmask="@1,2,3",
-  qmcharge=0,
-  spin=1,
-  qm_theory="uma",
-  ml_keywords="--model uma-s-1p1 --embedcharge",
-  mlcut=12.0,
-/
+In `&qmmm`, `amber-mlips` expects:
+- `qm_theory="uma"|"orb"|"mace"|"aimnet2"`
+- `ml_keywords="..."` (options passed to internal MLIP server)
+
+All other AMBER control fields are kept as AMBER input.
+
+## Internal Transform (AMBER View)
+
+`amber-mlips` rewrites `mlmm.in` before launching AMBER:
+- `qm_theory` -> `'EXTERN'`
+- remove `ml_keywords`
+- force `qm_ewald=0` and `qmgb=0` (AMBER EXTERN requirement)
+- remove existing `&genmpi` blocks
+- append generated `&genmpi` with backend-specific `method`
+
+You can inspect transformed input with:
+```bash
+amber-mlips --keep-transformed-input ...
 ```
 
-Supported MLIP `qm_theory` values:
-- `uma`
-- `orb`
-- `mace`
-- `aimnet2`
+## `ml_keywords` and `--embedcharge`
 
-## Internal behavior
-
-`amber-mlips` automatically:
-1. rewrites `&qmmm` to use `qm_theory='EXTERN'`,
-2. maps `mlcut -> qmcut`,
-3. injects `&genmpi`,
-4. starts an internal `amber-mlips-server`,
-5. launches AMBER/server through a PRRTE DVM when available (`prte` + `prun`),
-6. runs `sander.MPI` (or configured sander binary),
-7. stops the server.
-
-Note: AMBER EXTERN requires `qm_ewald=0` and `qmgb=0`, so wrapper enforces these values in transformed input.
-
-## Launcher mode
-
-`amber-mlips` supports:
-- `--launcher-mode auto` (default): use DVM (`prte`/`prun`) if available, else direct launch.
-- `--launcher-mode dvm`: require DVM launch.
-- `--launcher-mode direct`: no DVM.
-
-`OpenMPI 5` singleton mode may fail for `MPI_Publish_name`/`MPI_Lookup_name`.
-In that case, use `auto` or `dvm` so wrapper runs both server and `sander.MPI` in the same DVM.
-
-## `--embedcharge` behavior
-
-- `ml_keywords` can include `--embedcharge`.
-- When enabled, server applies xTB-based point-charge embedding correction
-  (`delta_embedcharge_minus_noembed`) and returns corrected QM/MM gradients.
-- Requirements:
-  - `xtb` executable available in PATH, or pass `--xtb-cmd /path/to/xtb`.
-  - Extra xTB options can be passed in `ml_keywords`:
-    - `--xtb-cmd`
-    - `--xtb-acc`
-    - `--xtb-workdir`
-    - `--xtb-keep-files`
-    - `--xtb-ncores`
+`ml_keywords` is parsed like shell CLI tokens and forwarded to the internal
+`amber-mlips-server` process.
 
 Example:
 ```text
 ml_keywords="--model uma-s-1p1 --embedcharge --xtb-cmd xtb --xtb-ncores 4"
 ```
 
-## Smoke-test model (dependency-free)
+`--embedcharge` enables xTB point-charge embedding correction using MM point charges from the AMBER EXTERN interface.
 
-For protocol/integration testing without torch models, use:
+For `--embedcharge`, xTB must be available (`xtb` in `PATH` or `--xtb-cmd /path/to/xtb`).
+
+## Launcher Modes
+
+- `--launcher-mode auto` (default): use PRRTE DVM (`prte` + `prun`) when available, else direct launch.
+- `--launcher-mode dvm`: require DVM.
+- `--launcher-mode direct`: no DVM.
+
+`auto`/`dvm` is recommended for OpenMPI5 environments where singleton naming can fail.
+
+## Smoke-Test Models
+
+For protocol/integration checks without heavy ML dependencies:
 - `--model builtin:zero`
 - `--model builtin:harmonic`
 - `--model builtin:harmonic:0.05`
 
-These are for testing and debugging only.
+These are for testing/debugging only.
 
-## Install
+## Installing Model Families
 
 ```bash
-pip install .
+pip install "amber-mlips[uma]"      # UMA
+pip install "amber-mlips[orb]"      # ORB
+pip install "amber-mlips[mace]"     # MACE
+pip install "amber-mlips[aimnet2]"  # AIMNet2
+pip install amber-mlips              # core only
 ```
 
-Development / editable install:
-
+Local editable install:
 ```bash
+cd amber-mlips
 pip install -e . --no-deps
 ```
 
-For backend extras:
+Model download notes:
+- **UMA**: Hugging Face access may require `huggingface-cli login`.
+- **ORB / MACE / AIMNet2**: downloaded automatically on first use.
 
-```bash
-pip install .[uma]
-pip install .[orb]
-pip install .[mace]
-pip install .[aimnet2]
-```
+## Advanced Options
+
+See [`OPTIONS.md`](OPTIONS.md) for wrapper and backend/server options.
+
+Implementation details are summarized in [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
+
+Command entry points:
+- `amber-mlips` (single-command AMBER wrapper)
+- `amber-mlips-server` (internal genmpi server; normally not run directly)
 
 ## Troubleshooting
 
-- If AMBER binaries cannot find `libcudart.so.12`, ensure CUDA runtime is on `LD_LIBRARY_PATH`.
-- In some PRRTE environments, a non-fatal `OPAL ERROR: Server not available` may appear during teardown after successful completion.
+- **`Internal MLIP server exited early`**:
+  - Check backend dependencies (torch/fairchem/orb-models/mace/aimnet).
+  - Use `--dry-run --debug` to inspect generated commands.
+- **MPI name service errors (`Publish_name` / `Lookup_name`)**:
+  - Use `--launcher-mode auto` or `--launcher-mode dvm`.
+- **`qm_theory='...' is not supported`**:
+  - Use one of `uma`, `orb`, `mace`, `aimnet2` in user `&qmmm`.
+- **xTB error with `--embedcharge`**:
+  - Confirm `xtb` is installed and reachable; set `--xtb-cmd` explicitly.
+- **CUDA/OpenMPI runtime library errors**:
+  - Ensure your module/conda environment exports required runtime libraries in `LD_LIBRARY_PATH`.

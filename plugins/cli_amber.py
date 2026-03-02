@@ -219,13 +219,16 @@ def _stop_dvm(dvm_state, env=None):
                 pass
 
 
-def _build_prun_prefix(prun_bin, dvm_uri_file):
+def _build_prun_prefix(prun_bin, dvm_uri_file, n_ranks):
+    n = int(n_ranks)
+    if n < 1:
+        raise AmberMLIPSError("--mm-ranks must be >= 1.")
     return [
         prun_bin,
         "--dvm-uri",
         "file:{}".format(dvm_uri_file),
         "-n",
-        "1",
+        str(n),
     ]
 
 
@@ -364,6 +367,12 @@ def build_parser():
         choices=("auto", "dvm", "direct"),
         help="Execution launcher: auto(detect prte/prun), dvm(always prte+prun), or direct(no DVM).",
     )
+    parser.add_argument(
+        "--mm-ranks",
+        type=int,
+        default=1,
+        help="MPI ranks for sander (MM side). ML server always runs with 1 rank.",
+    )
     parser.add_argument("--keep-transformed-input", action="store_true", help="Keep transformed mdin as '<input>.amber_mlips.genmpi.in'.")
     parser.add_argument("--dry-run", action="store_true", help="Transform input and print commands, but do not run sander.")
     parser.add_argument("--debug", action="store_true", help="Verbose wrapper/server logs.")
@@ -375,11 +384,11 @@ def _print_help(parser):
     parser.print_help(sys.stderr)
     print(
         "\nPass all standard sander flags after wrapper options, e.g.\n"
-        "  amber-mlips -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7\n"
+        "  amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7\n"
         "\nqmmm requirements in the user mdin:\n"
         "  qm_theory = \"uma\"|\"orb\"|\"mace\"|\"aimnet2\"\n"
         "  ml_keywords = \"--model ... [backend options]\"\n"
-        "  mlcut = ...   (optional; mapped to qmcut)\n",
+        "  (other qmmm fields follow native AMBER behavior)\n",
         file=sys.stderr,
     )
 
@@ -423,14 +432,30 @@ def main(argv=None):
 
         forward_exec = _replace_input_path(forward, i_idx, inline_i, transformed_path)
         sander_bin = _resolve_sander_bin(ns.sander_bin)
+        mm_ranks = int(ns.mm_ranks)
+        if mm_ranks < 1:
+            raise AmberMLIPSError("--mm-ranks must be >= 1.")
 
         launcher_mode, prte_bin, prun_bin = _choose_launcher(ns.launcher_mode)
+        if launcher_mode == "direct" and mm_ranks > 1:
+            raise AmberMLIPSError(
+                "--mm-ranks > 1 requires DVM launch. Use --launcher-mode auto or dvm."
+            )
+        if mm_ranks > 1:
+            sander_name = os.path.basename(str(sander_bin)).lower()
+            if ".mpi" not in sander_name:
+                raise AmberMLIPSError(
+                    "--mm-ranks > 1 requires an MPI-capable sander binary (e.g., sander.MPI). "
+                    "Current binary: {}".format(sander_bin)
+                )
         if ns.debug:
             print("[amber-mlips] backend: {}".format(transformed.backend), file=sys.stderr)
             print("[amber-mlips] transformed input: {}".format(transformed_path), file=sys.stderr)
             print("[amber-mlips] launcher mode: {}".format(launcher_mode), file=sys.stderr)
+            print("[amber-mlips] mm ranks: {}".format(mm_ranks), file=sys.stderr)
 
-        launch_prefix = []
+        server_launch_prefix = []
+        amber_launch_prefix = []
         dvm_cmd_preview = None
         if launcher_mode == "dvm":
             if ns.dry_run:
@@ -443,12 +468,14 @@ def main(argv=None):
                     "--report-pid",
                     "/tmp/amber_mlips_dryrun.dvm.pid",
                 ]
-                launch_prefix = _build_prun_prefix(prun_bin, dvm_uri_file)
+                server_launch_prefix = _build_prun_prefix(prun_bin, dvm_uri_file, n_ranks=1)
+                amber_launch_prefix = _build_prun_prefix(prun_bin, dvm_uri_file, n_ranks=mm_ranks)
             else:
                 dvm_state = _start_dvm(prte_bin, debug=bool(ns.debug), env=subprocess_env)
-                launch_prefix = _build_prun_prefix(prun_bin, dvm_state["uri_file"])
+                server_launch_prefix = _build_prun_prefix(prun_bin, dvm_state["uri_file"], n_ranks=1)
+                amber_launch_prefix = _build_prun_prefix(prun_bin, dvm_state["uri_file"], n_ranks=mm_ranks)
 
-        amber_cmd = list(launch_prefix) + [sander_bin] + forward_exec
+        amber_cmd = list(amber_launch_prefix) + [sander_bin] + forward_exec
         if ns.dry_run:
             dry_ready = "/tmp/amber_mlips_dryrun.ready"
             server_base = _build_server_cmd(
@@ -457,7 +484,7 @@ def main(argv=None):
                 ml_keywords=transformed.ml_keywords,
                 debug=bool(ns.debug),
             )
-            server_cmd = list(launch_prefix) + server_base
+            server_cmd = list(server_launch_prefix) + server_base
             if dvm_cmd_preview is not None:
                 print("[amber-mlips] dvm    cmd: {}".format(" ".join(shlex.quote(x) for x in dvm_cmd_preview)), file=sys.stderr)
             print("[amber-mlips] server cmd: {}".format(" ".join(shlex.quote(x) for x in server_cmd)), file=sys.stderr)
@@ -468,7 +495,7 @@ def main(argv=None):
             transformed.backend,
             transformed.ml_keywords,
             debug=bool(ns.debug),
-            launcher_prefix=launch_prefix,
+            launcher_prefix=server_launch_prefix,
             env=subprocess_env,
         )
 

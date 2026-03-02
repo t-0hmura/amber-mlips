@@ -4,12 +4,10 @@
 User-facing input (in &qmmm):
 - qm_theory = "uma"|"orb"|"mace"|"aimnet2"
 - ml_keywords = "..."
-- mlcut = <float>   (optional; mapped to qmcut)
 
 Internal transformed input:
 - qm_theory = 'EXTERN'
-- ml_keywords / mlcut removed
-- qmcut set from mlcut if provided
+- ml_keywords removed
 - &genmpi block injected
 
 Notes:
@@ -203,14 +201,6 @@ def transform_mdin_text(text):
         del values["ml_keywords"]
     if "ml_keywords" in order:
         order.remove("ml_keywords")
-
-    if "mlcut" in values:
-        values["qmcut"] = values["mlcut"]
-        if "qmcut" not in order:
-            order.append("qmcut")
-        del values["mlcut"]
-        if "mlcut" in order:
-            order.remove("mlcut")
 
     # Force EXTERN + allowed EXTERN settings.
     values["qm_theory"] = "'EXTERN'"
