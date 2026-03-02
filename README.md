@@ -15,8 +15,6 @@ An optional **point-charge embedding** correction (`xTB`) is available via `--em
 
 Requires **Python 3.9** or later and **AMBER** (`sander`).
 
-> For Gaussian 16 users, see: https://github.com/t-0hmura/g16-mlips
-
 ## Quick Start (Default = UMA)
 
 1. Install PyTorch suitable for your CUDA environment.
