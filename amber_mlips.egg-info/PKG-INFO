@@ -1,13 +1,12 @@
 Metadata-Version: 2.4
 Name: amber-mlips
-Version: 0.1.0
-Summary: MLIP plugin wrapper for AMBER QM/MM via EXTERN+genmpi
+Version: 0.1.1.dev2
+Summary: MLIP plugin wrapper for AMBER QM/MM via EXTERN+qc (non-MPI shim)
 License-Expression: MIT
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: numpy
 Requires-Dist: ase
-Requires-Dist: mpi4py
 Provides-Extra: uma
 Requires-Dist: torch>=2.8.0; extra == "uma"
 Requires-Dist: fairchem-core>=2.13; extra == "uma"
@@ -23,12 +22,61 @@ Requires-Dist: aimnet; extra == "aimnet2"
 
 # amber-mlips
 
-`amber-mlips` is a single-command wrapper for AMBER QM/MM using MLIP backends through `qm_theory=EXTERN` + `&genmpi`.
+`amber-mlips` is a single-command wrapper for **AMBER QM/MM** with MLIP backends.
+It keeps a `sander`-style CLI and internally uses AMBER `qm_theory='EXTERN'` with `&qc`
+through a private non-MPI `qchem` shim.
 
-## Usage
+Supported backend selectors (`&qmmm: qm_theory`):
+- `uma`
+- `orb`
+- `mace`
+- `aimnet2`
 
-Run with sander-style flags:
+## Features
 
+- Single command: `amber-mlips ...` (no external server command required).
+- Input style remains AMBER-native except two plugin keys:
+  - `qm_theory="uma|orb|mace|aimnet2"`
+  - `ml_keywords="..."`
+- Non-MPI ML path (`qchem` shim); no `genmpi`/MPI name-service dependency.
+- MM side can still use MPI ranks via `--mm-ranks`.
+
+## Installation
+
+Install core package:
+```bash
+pip install amber-mlips
+```
+
+Install with backend extras:
+```bash
+pip install "amber-mlips[uma]"
+pip install "amber-mlips[orb]"
+pip install "amber-mlips[mace]"
+pip install "amber-mlips[aimnet2]"
+```
+
+Local editable install:
+```bash
+cd amber-mlips
+pip install -e . --no-deps
+```
+
+## Quick Start
+
+1. Prepare AMBER input (`mlmm.in`):
+```text
+&qmmm
+  qmmask="@1,2,3",
+  qmcharge=0,
+  spin=1,
+  qm_theory="uma",
+  ml_keywords="--model uma-s-1p1 --embedcharge",
+  qmcut=12.0,
+/
+```
+
+2. Run with standard `sander` flags:
 ```bash
 amber-mlips -O \
   -i mlmm.in \
@@ -37,82 +85,76 @@ amber-mlips -O \
   -c md.rst7 \
   -r mlmm.rst7 \
   -ref leap.parm7 \
-  -x mlmm.crd \
+  -x mlmm.nc \
   -inf mlmm.info
 ```
 
-## User mdin (`&qmmm`)
-
-In your input file, set:
-
-```text
-&qmmm
-  qmmask="@1,2,3",
-  qmcharge=0,
-  spin=1,
-  qm_theory="uma",
-  ml_keywords="--model uma-s-1p1 --embedcharge",
-  mlcut=12.0,
-/
+3. MM MPI parallelism (CPU side):
+```bash
+amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7
 ```
 
-Supported MLIP `qm_theory` values:
-- `uma`
-- `orb`
-- `mace`
-- `aimnet2`
+## Input Semantics
 
-## Internal behavior
+In `&qmmm`, only these keys are plugin-specific:
+- `qm_theory` (`uma|orb|mace|aimnet2`)
+- `ml_keywords` (backend options string)
 
-`amber-mlips` automatically:
-1. rewrites `&qmmm` to use `qm_theory='EXTERN'`,
-2. maps `mlcut -> qmcut`,
-3. injects `&genmpi`,
-4. starts an internal `amber-mlips-server`,
-5. runs `sander.MPI` (or configured sander binary),
-6. stops the server.
+Everything else follows native AMBER behavior.
+Use `qmcut` directly; no `mlcut` alias is used.
 
-Note: AMBER EXTERN requires `qm_ewald=0` and `qmgb=0`, so wrapper enforces these values in transformed input.
+## Internal Transform
 
-## `--embedcharge` behavior
+Before launching AMBER, `amber-mlips` transforms input as follows:
+- `qm_theory` -> `'EXTERN'`
+- remove `ml_keywords`
+- force `qm_ewald=0` and `qmgb=0` (EXTERN constraints)
+- remove existing `&genmpi`/`&qc` blocks
+- append generated `&qc`
 
-- `ml_keywords` can include `--embedcharge`.
-- When enabled, server applies xTB-based point-charge embedding correction
-  (`delta_embedcharge_minus_noembed`) and returns corrected QM/MM gradients.
-- Requirements:
-  - `xtb` executable available in PATH, or pass `--xtb-cmd /path/to/xtb`.
-  - Extra xTB options can be passed in `ml_keywords`:
-    - `--xtb-cmd`
-    - `--xtb-acc`
-    - `--xtb-workdir`
-    - `--xtb-keep-files`
-    - `--xtb-ncores`
+Inspect transformed input with:
+```bash
+amber-mlips --keep-transformed-input ...
+```
+
+## `ml_keywords`
+
+`ml_keywords` is parsed like shell tokens and passed to the internal qchem shim.
+Common options:
+- `--model <name_or_alias_or_path>`
+- `--device auto|cpu|cuda`
+- `--embedcharge`
+- `--xtb-cmd <path_or_cmd>`
+- `--xtb-ncores <int>`
+- `--debug`
 
 Example:
 ```text
 ml_keywords="--model uma-s-1p1 --embedcharge --xtb-cmd xtb --xtb-ncores 4"
 ```
 
-## Smoke-test model (dependency-free)
+## Launcher Behavior
 
-For protocol/integration testing without torch models, use:
+- ML path is non-MPI by design.
+- MM side launch is controlled by:
+  - `--mm-ranks`
+  - `--launcher-mode auto|mpi|direct`
+
+`auto` uses direct launch for rank 1 and MPI launcher for rank > 1.
+
+## Smoke-Test Models
+
+For lightweight integration tests:
 - `--model builtin:zero`
 - `--model builtin:harmonic`
-- `--model builtin:harmonic:0.05`
+- `--model builtin:harmonic:<k>`
 
-These are for testing and debugging only.
+## Notes
 
-## Install
+- UMA models may require Hugging Face authentication (`huggingface-cli login`).
+- `--embedcharge` requires `xtb` installed and reachable.
 
-```bash
-pip install .
-```
+## More Docs
 
-For backend extras:
-
-```bash
-pip install .[uma]
-pip install .[orb]
-pip install .[mace]
-pip install .[aimnet2]
-```
+- Wrapper and keyword options: [`OPTIONS.md`](OPTIONS.md)
+- Implementation details: [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md)

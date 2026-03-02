@@ -1,6 +1,5 @@
 numpy
 ase
-mpi4py
 
 [aimnet2]
 torch>=2.8.0

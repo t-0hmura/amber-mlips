@@ -2,89 +2,79 @@
 
 ## Wrapper Workflow
 
-`amber-mlips` executes the following sequence:
+`amber-mlips` executes this sequence:
 
-1. Parse wrapper options and collect all forwarded `sander` flags.
+1. Parse wrapper options and forwarded `sander` flags.
 2. Locate `-i <mdin>` in forwarded arguments.
 3. Transform user mdin (`plugins/mdin_transform.py`).
-4. Start internal `amber-mlips-server` (`plugins/genmpi_server.py`).
-5. Launch AMBER (`sander`/`sander.MPI`) with transformed mdin.
-6. Wait for completion and clean up server + temporary files.
+4. Stage a private `qchem` shim in a temporary directory.
+5. Set runtime env:
+   - prepend shim directory to `PATH`
+   - export backend/options via `AMBER_MLIPS_BACKEND` and `AMBER_MLIPS_ML_KEYWORDS`
+6. Launch AMBER (`sander` or `sander.MPI`) with transformed mdin.
+7. Clean temporary transformed input and shim directory.
 
-When `--launcher-mode dvm` (or `auto` with PRRTE available), both server and AMBER are launched via `prun` in the same DVM.
+There is no MPI name-service process and no `genmpi` server in this runtime path.
 
 ## mdin Transform Rules
 
-`transform_mdin_text(...)` enforces a safe EXTERN path:
+`transform_mdin_text(...)` enforces EXTERN-compatible input:
 
 - Read backend from user `qm_theory` (`uma|orb|mace|aimnet2`).
-- Extract `ml_keywords` (kept only for server launch).
+- Extract `ml_keywords` (used only by shim, not passed to AMBER `&qmmm`).
 - Rewrite `qm_theory -> 'EXTERN'`.
 - Force `qm_ewald=0` and `qmgb=0`.
-- Remove pre-existing `&genmpi` blocks.
-- Append generated `&genmpi`:
-  - `method='UMA'|'ORB'|'MACE'|'AIMNET2'`
-  - `basis='MLIP'`
-  - `ntpr=1`, `debug=0`, `dipole=0`
+- Remove pre-existing `&genmpi` and `&qc` blocks.
+- Append generated `&qc` block.
 
-Only the transformed mdin is passed to AMBER.
+Only transformed mdin is passed to AMBER.
 
-## genmpi Server Protocol
+## qchem Shim Interface
 
-`amber-mlips-server` publishes MPI service name `qc_program_port` and serves
-AMBER EXTERN requests over an intercommunicator.
+`plugins/nonmpi_qc_shim.py` implements AMBER `&qc` executable contract:
 
-Per step it receives:
-- QM charge, spin multiplicity
-- QM atom count and 2-char atom labels
-- QM coordinates
-- MM point-charge count, charges, and coordinates
+- Called as: `qchem <inpfile> <logfile> <savfile>`
+- Parses `<inpfile>` sections:
+  - `$molecule`
+  - optional `$external_charges`
+- Evaluates MLIP backend and optional embedcharge correction.
+- Writes:
+  - `<logfile>` containing `SCF   energy` line (Hartree)
+  - `efield.dat` with MM electric fields then QM gradients
 
-It returns:
-- total QM energy (`Eh`)
-- QM charges array (currently zeros)
-- dipole array (currently zeros)
-- QM gradients (`Eh/Bohr`)
-- MM point-charge gradients (`Eh/Bohr`)
+AMBER parser side is `qm2_extern_qc_module.F90`.
 
-AMBER QM/MM MD path here is energy/gradient only (no Hessian exchange).
+## Units and Mapping
 
-## Unit Conversion
-
-Backends output MLIP units:
+MLIP backend native outputs:
 - energy: `eV`
 - forces: `eV/Ang`
 
-Server returns AMBER EXTERN units after conversion:
-- energy: `Eh`
-- gradients: `Eh/Bohr`
+AMBER `&qc` reader expects:
+- energy in `Eh`
+- QM gradient in `Eh/Bohr`
+- MM electric field in atomic units
 
-Implemented in `plugins/mlip_backends.py`:
-- `ev_to_ha(...)`
-- `forces_ev_ang_to_gradient_ha_bohr(...)`
+Conversions:
+- `E_h = E_eV / 27.211386245988`
+- gradient is `-force`
+- MM e-field relation used by AMBER: `grad_mm = -E * q_mm`
+  - shim writes `E = -grad_mm / q_mm` for `q_mm != 0`
 
-## Point-Charge Embedding Correction (`--embedcharge`)
+## Embedcharge (`--embedcharge`)
 
-When enabled, server adds xTB-based embedding correction:
-
+When enabled, shim applies xTB correction:
 - `dE = E_xTB(embed) - E_xTB(no-embed)`
 - `dF = F_xTB(embed) - F_xTB(no-embed)`
 
-Injected quantities:
+Injected totals:
 - `E_total = E_MLIP + dE`
-- `F_total = F_MLIP + dF` (on QM and MM point-charge blocks)
+- `F_total = F_MLIP + dF` (QM and MM point-charge blocks)
 
-Implementation:
-- correction driver: `plugins/xtb_embedcharge_correction.py`
-- integration into request loop: `plugins/genmpi_server.py`
+Requires `xtb` (or explicit `--xtb-cmd`).
 
-Requires xTB executable (`xtb` or `--xtb-cmd`).
+## MM MPI Launch
 
-## Launcher and MPI Notes
-
-- `direct` mode starts AMBER and server as normal processes.
-- `dvm` mode creates PRRTE DVM (`prte`) and launches both via `prun --dvm-uri ...`.
-- OpenMPI5 singleton mode may fail around name publish/lookup; DVM mode avoids most of these failures.
-
-Server teardown intentionally avoids strict `MPI_Unpublish_name`/`MPI_Close_port`
-cleanup in some DVM environments to prevent noisy OPAL teardown errors after successful runs.
+ML path stays non-MPI. MM side launch is independent:
+- `--mm-ranks 1` + `--launcher-mode auto` => direct `sander`
+- `--mm-ranks > 1` => MPI launcher (`mpirun`/`mpiexec`) + `sander.MPI`

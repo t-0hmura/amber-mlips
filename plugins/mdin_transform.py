@@ -8,7 +8,7 @@ User-facing input (in &qmmm):
 Internal transformed input:
 - qm_theory = 'EXTERN'
 - ml_keywords removed
-- &genmpi block injected
+- &qc block injected
 
 Notes:
 - AMBER EXTERN path requires qm_ewald=0 and qmgb=0.
@@ -136,10 +136,8 @@ _QMMM_RE = re.compile(
     re.MULTILINE,
 )
 
-_GENMPI_RE = re.compile(
-    r"(?ims)^[ \t]*&genmpi\b.*?^[ \t]*/[ \t]*\n?",
-    re.MULTILINE,
-)
+_GENMPI_RE = re.compile(r"(?ims)^[ \t]*&genmpi\b.*?^[ \t]*/[ \t]*\n?", re.MULTILINE)
+_QC_RE = re.compile(r"(?ims)^[ \t]*&qc\b.*?^[ \t]*/[ \t]*\n?", re.MULTILINE)
 
 
 def _build_qmmm_block(order, values, key_style):
@@ -154,23 +152,20 @@ def _build_qmmm_block(order, values, key_style):
     return "\n".join(lines) + "\n"
 
 
-def _build_genmpi_block(backend):
-    method = {
-        "uma": "UMA",
-        "orb": "ORB",
-        "mace": "MACE",
-        "aimnet2": "AIMNET2",
-    }[backend]
-
+def _build_qc_block():
+    # Trigger AMBER EXTERN through the non-MPI qchem interface.
     return (
-        "&genmpi\n"
-        "  method='{}',\n"
-        "  basis='MLIP',\n"
+        "&qc\n"
+        "  method='BLYP',\n"
+        "  basis='6-31G*',\n"
+        "  num_mpi_prcs=1,\n"
+        "  num_threads=1,\n"
         "  ntpr=1,\n"
         "  debug=0,\n"
         "  dipole=0,\n"
+        "  use_template=0,\n"
         "/\n"
-    ).format(method)
+    )
 
 
 def transform_mdin_text(text):
@@ -229,10 +224,11 @@ def transform_mdin_text(text):
 
     rewritten = text[: match.start()] + new_qmmm + text[match.end() :]
     rewritten = _GENMPI_RE.sub("", rewritten)
+    rewritten = _QC_RE.sub("", rewritten)
 
     if not rewritten.endswith("\n"):
         rewritten += "\n"
-    rewritten += "\n" + _build_genmpi_block(backend)
+    rewritten += "\n" + _build_qc_block()
 
     return TransformResult(
         backend=backend,

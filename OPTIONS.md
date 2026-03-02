@@ -1,19 +1,21 @@
 # amber-mlips Options
 
-For most users, defaults are sufficient.
-
 ## Wrapper Options (`amber-mlips`)
 
-These options belong to the top-level wrapper command.
-All unrecognized flags are forwarded to `sander`/`sander.MPI`.
+Wrapper options are consumed by `amber-mlips`; all unrecognized flags are forwarded to `sander`.
 
-- `--sander-bin <path>` — Explicit AMBER executable path.
-- `--launcher-mode auto|dvm|direct` — Launch strategy for AMBER + server.
-- `--mm-ranks <int>` — MPI ranks for `sander` (MM side). Server always uses 1 rank.
-- `--keep-transformed-input` — Save transformed mdin as `<input>.amber_mlips.genmpi.in`.
-- `--dry-run` — Print server/AMBER commands without executing.
-- `--debug` — Verbose wrapper/server logs.
-- `-h`, `--help` — Print wrapper help.
+- `--sander-bin <path>`: explicit AMBER executable.
+- `--mpi-bin <path_or_cmd>`: MPI launcher for MM ranks > 1 (default auto-detect `mpirun`/`mpiexec`).
+- `--launcher-mode auto|mpi|direct|dvm`:
+  - `auto`: direct launch when `--mm-ranks 1`, MPI launch when `--mm-ranks > 1`
+  - `mpi`: force MPI launcher usage
+  - `direct`: never use MPI launcher
+  - `dvm`: accepted as deprecated alias of `mpi`
+- `--mm-ranks <int>`: MM-side rank count.
+- `--keep-transformed-input`: save transformed mdin as `<input>.amber_mlips.qc.in`.
+- `--dry-run`: print transformed command and exit.
+- `--debug`: verbose wrapper/shim logs.
+- `-h`, `--help`: print help.
 
 Typical use:
 ```bash
@@ -22,21 +24,21 @@ amber-mlips [wrapper-options] -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7
 
 ## User `&qmmm` Fields
 
-`amber-mlips` adds two user-facing fields in `&qmmm`:
-
+Plugin-specific fields:
 - `qm_theory="uma"|"orb"|"mace"|"aimnet2"` (required)
-- `ml_keywords="..."` (optional but usually required)
+- `ml_keywords="..."` (optional, usually required)
 
 On transform:
 - `qm_theory` is rewritten to `'EXTERN'`
 - `ml_keywords` is removed before AMBER run
 - `qm_ewald` and `qmgb` are forced to `0`
-- generated `&genmpi` is appended
+- generated `&qc` is appended
 
-## `ml_keywords` (Server Options)
+All other `&qmmm` fields remain AMBER-native (`qmcut` etc.).
 
-`ml_keywords` is parsed with shell token rules (`shlex.split`) and passed to
-internal `amber-mlips-server`.
+## `ml_keywords` Options
+
+`ml_keywords` is parsed with shell token rules (`shlex.split`) and consumed by the qchem shim.
 
 Common options:
 - `--model <name_or_alias_or_path>`
@@ -67,7 +69,7 @@ Backend-specific options:
 
 ## Builtin Test Models
 
-For integration tests without backend packages:
+For integration checks without external ML packages:
 - `--model builtin:zero`
 - `--model builtin:harmonic`
 - `--model builtin:harmonic:<k>`
@@ -76,19 +78,3 @@ Example:
 ```text
 ml_keywords="--model builtin:zero"
 ```
-
-## Reserved Server Flags
-
-The wrapper controls these internally; do not pass them in `ml_keywords`:
-- `--backend`
-- `--service-name`
-- `--ready-file`
-
-## Launcher Behavior
-
-- `auto`: uses DVM if both `prte` and `prun` are found; otherwise direct mode.
-- `dvm`: requires `prte` + `prun`; fails fast if missing.
-- `direct`: no DVM, starts server and AMBER directly.
-- `--mm-ranks > 1`: requires DVM mode (`auto` with PRRTE available, or `dvm`) and an MPI-capable sander binary.
-
-In OpenMPI5 environments, DVM mode is generally the most robust for name-service operations.

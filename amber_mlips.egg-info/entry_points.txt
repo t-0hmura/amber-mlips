@@ -1,3 +1,2 @@
 [console_scripts]
 amber-mlips = amber_mlips_plugins.cli_amber:main
-amber-mlips-server = amber_mlips_plugins.genmpi_server:main

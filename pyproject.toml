@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "amber-mlips"
 dynamic = ["version"]
-description = "MLIP plugin wrapper for AMBER QM/MM via EXTERN+genmpi"
+description = "MLIP plugin wrapper for AMBER QM/MM via EXTERN+qc (non-MPI shim)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "ase",
-    "mpi4py",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +22,6 @@ aimnet2 = ["torch>=2.8.0", "aimnet"]
 
 [project.scripts]
 amber-mlips = "amber_mlips_plugins.cli_amber:main"
-amber-mlips-server = "amber_mlips_plugins.genmpi_server:main"
 
 [tool.setuptools]
 packages = ["amber_mlips_plugins"]
