@@ -114,11 +114,11 @@ ml_keywords="--model uma-s-1p1 --embedcharge --xtb-cmd xtb --xtb-ncores 4"
 ## Launcher Behavior
 
 - ML path is non-MPI by design.
-- MM side launch is controlled by:
-  - `--mm-ranks`
-  - `--launcher-mode auto|mpi|direct`
-
-`auto` uses direct launch for rank 1 and MPI launcher for rank > 1.
+- MM side launch is controlled by `--mm-ranks` only.
+- Launch policy is fixed to auto:
+  - `--mm-ranks 1`: direct `sander`
+  - `--mm-ranks > 1`: MPI launcher + `sander.MPI`
+- Optional override for launcher binary: `--mpi-bin`.
 
 ## Smoke-Test Models
 

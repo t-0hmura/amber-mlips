@@ -6,11 +6,6 @@ Wrapper options are consumed by `amber-mlips`; all unrecognized flags are forwar
 
 - `--sander-bin <path>`: explicit AMBER executable.
 - `--mpi-bin <path_or_cmd>`: MPI launcher for MM ranks > 1 (default auto-detect `mpirun`/`mpiexec`).
-- `--launcher-mode auto|mpi|direct|dvm`:
-  - `auto`: direct launch when `--mm-ranks 1`, MPI launch when `--mm-ranks > 1`
-  - `mpi`: force MPI launcher usage
-  - `direct`: never use MPI launcher
-  - `dvm`: accepted as deprecated alias of `mpi`
 - `--mm-ranks <int>`: MM-side rank count.
 - `--keep-transformed-input`: save transformed mdin as `<input>.amber_mlips.qc.in`.
 - `--dry-run`: print transformed command and exit.
@@ -21,6 +16,10 @@ Typical use:
 ```bash
 amber-mlips [wrapper-options] -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 ...
 ```
+
+MM launch behavior is fixed to auto:
+- `--mm-ranks 1` => direct `sander`
+- `--mm-ranks > 1` => MPI launcher + `sander.MPI`
 
 ## User `&qmmm` Fields
 

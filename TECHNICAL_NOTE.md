@@ -76,5 +76,5 @@ Requires `xtb` (or explicit `--xtb-cmd`).
 ## MM MPI Launch
 
 ML path stays non-MPI. MM side launch is independent:
-- `--mm-ranks 1` + `--launcher-mode auto` => direct `sander`
+- `--mm-ranks 1` => direct `sander`
 - `--mm-ranks > 1` => MPI launcher (`mpirun`/`mpiexec`) + `sander.MPI`

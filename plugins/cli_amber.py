@@ -21,12 +21,35 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import ExitStack
+from dataclasses import dataclass
 
 from .mdin_transform import InputTransformError, transform_mdin_text
 
 
 class AmberMLIPSError(RuntimeError):
     """Raised for wrapper-level runtime failures."""
+
+
+@dataclass(frozen=True)
+class InputArgRef:
+    """Reference to the original `-i` argument in forwarded sander args."""
+
+    index: int
+    inline_path: str
+    user_path: str
+
+
+@dataclass(frozen=True)
+class LaunchSpec:
+    """Resolved MM launch mode and command prefix."""
+
+    mode: str
+    prefix: tuple
+
+
+def _is_executable(path):
+    return os.path.isfile(path) and os.access(path, os.X_OK)
 
 
 def _build_runtime_env():
@@ -36,6 +59,8 @@ def _build_runtime_env():
     env.setdefault("OMPI_MCA_opal_warn_on_missing_libcuda", "0")
     if "OMPI_MCA_opal_cuda_support" not in env and not os.path.exists("/dev/nvidiactl"):
         env["OMPI_MCA_opal_cuda_support"] = "0"
+
+    # Some environments only provide libcudart through conda.
     conda_prefix = env.get("CONDA_PREFIX", "").strip()
     if conda_prefix:
         conda_lib = os.path.join(conda_prefix, "lib")
@@ -45,25 +70,32 @@ def _build_runtime_env():
             paths = [p for p in ld.split(os.pathsep) if p]
             if conda_lib not in paths:
                 env["LD_LIBRARY_PATH"] = conda_lib + (os.pathsep + ld if ld else "")
+
     return env
 
 
+def _resolve_user_choice(path_or_name, option_name):
+    if not path_or_name:
+        return None
+    if _is_executable(path_or_name):
+        return path_or_name
+    found = shutil.which(path_or_name)
+    if found:
+        return found
+    raise AmberMLIPSError(
+        "{} not found or not executable: {}".format(option_name, path_or_name)
+    )
+
+
 def _resolve_sander_bin(user_choice, prefer_mpi=False):
-    if user_choice:
-        if os.path.isfile(user_choice) and os.access(user_choice, os.X_OK):
-            return user_choice
-        found = shutil.which(user_choice)
-        if found:
-            return found
-        raise AmberMLIPSError("--sander-bin not found or not executable: {}".format(user_choice))
+    resolved = _resolve_user_choice(user_choice, "--sander-bin")
+    if resolved:
+        return resolved
 
-    if prefer_mpi:
-        names = ("sander.MPI", "sander")
-    else:
-        names = ("sander", "sander.MPI")
+    names = ("sander.MPI", "sander") if prefer_mpi else ("sander", "sander.MPI")
 
-    candidates = []
     amberhome = os.environ.get("AMBERHOME", "").strip()
+    candidates = []
     if amberhome:
         for name in names:
             candidates.append(os.path.join(amberhome, "bin", name))
@@ -76,7 +108,7 @@ def _resolve_sander_bin(user_choice, prefer_mpi=False):
         candidates.append(fixed[name])
 
     for path in candidates:
-        if os.path.isfile(path) and os.access(path, os.X_OK):
+        if _is_executable(path):
             return path
 
     for name in names:
@@ -90,33 +122,29 @@ def _resolve_sander_bin(user_choice, prefer_mpi=False):
 
 
 def _resolve_mpi_launcher(user_choice=None):
-    if user_choice:
-        if os.path.isfile(user_choice) and os.access(user_choice, os.X_OK):
-            return user_choice
-        found = shutil.which(user_choice)
-        if found:
-            return found
-        raise AmberMLIPSError("--mpi-bin not found or not executable: {}".format(user_choice))
+    resolved = _resolve_user_choice(user_choice, "--mpi-bin")
+    if resolved:
+        return resolved
 
     conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
     path_entries = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
 
     # Prefer non-conda MPI launchers when available, because conda-provided
     # launchers may not match module-loaded AMBER/OpenMPI runtime libraries.
-    def _iter_paths(name):
+    def iter_candidates(name):
         for entry in path_entries:
-            cand = os.path.join(entry, name)
-            if os.path.isfile(cand) and os.access(cand, os.X_OK):
-                yield cand
+            candidate = os.path.join(entry, name)
+            if _is_executable(candidate):
+                yield candidate
 
     non_conda = []
     conda = []
     for name in ("mpirun", "mpiexec"):
-        for cand in _iter_paths(name):
-            if conda_prefix and os.path.abspath(cand).startswith(os.path.abspath(conda_prefix) + os.sep):
-                conda.append(cand)
+        for candidate in iter_candidates(name):
+            if conda_prefix and os.path.abspath(candidate).startswith(os.path.abspath(conda_prefix) + os.sep):
+                conda.append(candidate)
             else:
-                non_conda.append(cand)
+                non_conda.append(candidate)
 
     if non_conda:
         return non_conda[0]
@@ -128,50 +156,56 @@ def _resolve_mpi_launcher(user_choice=None):
     )
 
 
-def _extract_input_path(argv):
+def _extract_input_arg(argv):
     for i, token in enumerate(argv):
         if token == "-i":
             if i + 1 >= len(argv):
                 raise AmberMLIPSError("-i flag was provided without a file path.")
-            return i, None, argv[i + 1]
+            return InputArgRef(index=i, inline_path=None, user_path=argv[i + 1])
+
         if token.startswith("-i") and len(token) > 2:
-            return i, token[2:], token[2:]
-    raise AmberMLIPSError("amber-mlips requires -i <mdin> so the wrapper can transform &qmmm.")
+            inline = token[2:]
+            return InputArgRef(index=i, inline_path=inline, user_path=inline)
+
+    raise AmberMLIPSError(
+        "amber-mlips requires -i <mdin> so the wrapper can transform &qmmm."
+    )
 
 
-def _replace_input_path(argv, idx, inline_path, new_path):
+def _replace_input_path(argv, input_ref, new_path):
     out = list(argv)
-    if inline_path is None:
-        out[idx + 1] = new_path
+    if input_ref.inline_path is None:
+        out[input_ref.index + 1] = new_path
     else:
-        out[idx] = "-i{}".format(new_path)
+        out[input_ref.index] = "-i{}".format(new_path)
     return out
 
 
-def _write_transformed_input(input_path, transformed_text, keep_file):
+def _write_transformed_input(stack, input_path, transformed_text, keep_file):
     src_abs = os.path.abspath(input_path)
 
     if keep_file:
         out_path = src_abs + ".amber_mlips.qc.in"
         with open(out_path, "w") as handle:
             handle.write(transformed_text)
-        return out_path, None
+        return out_path
 
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w",
-        prefix="amber_mlips_",
-        suffix=".in",
-        delete=False,
-    )
+    fd, tmp_path = tempfile.mkstemp(prefix="amber_mlips_", suffix=".in")
+    with os.fdopen(fd, "w") as handle:
+        handle.write(transformed_text)
+    stack.callback(_safe_unlink, tmp_path)
+    return tmp_path
+
+
+def _safe_unlink(path):
     try:
-        tmp.write(transformed_text)
-    finally:
-        tmp.close()
-    return tmp.name, tmp.name
+        os.unlink(path)
+    except OSError:
+        pass
 
 
-def _stage_qchem_shim():
-    runtime_dir = tempfile.mkdtemp(prefix="amber_mlips_qchem_")
+def _stage_qchem_shim(stack):
+    runtime_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="amber_mlips_qchem_"))
     qchem_path = os.path.join(runtime_dir, "qchem")
 
     script = (
@@ -181,36 +215,22 @@ def _stage_qchem_shim():
 
     with open(qchem_path, "w") as handle:
         handle.write(script)
-
     os.chmod(qchem_path, 0o755)
+
     return runtime_dir, qchem_path
 
 
-def _build_amber_launch(mode, mm_ranks, mpi_bin_opt):
-    launch_mode = str(mode or "auto").strip().lower()
-    if launch_mode not in {"auto", "mpi", "direct", "dvm"}:
-        raise AmberMLIPSError("Unknown --launcher-mode '{}'.".format(mode))
-
-    warnings = []
-    if launch_mode == "dvm":
-        warnings.append("--launcher-mode dvm is deprecated in non-MPI mode; using mpi launcher semantics.")
-        launch_mode = "mpi"
-
+def _build_launch_spec(mm_ranks, mpi_bin_opt):
     ranks = int(mm_ranks)
     if ranks < 1:
         raise AmberMLIPSError("--mm-ranks must be >= 1.")
 
-    if ranks == 1 and launch_mode == "auto":
-        return "direct", [], warnings
-
-    if launch_mode == "direct":
-        if ranks > 1:
-            raise AmberMLIPSError("--mm-ranks > 1 requires MPI launch (use --launcher-mode auto or mpi).")
-        return "direct", [], warnings
+    if ranks == 1:
+        return LaunchSpec(mode="direct", prefix=tuple())
 
     mpi_bin = _resolve_mpi_launcher(mpi_bin_opt)
-    nprocs = ranks if ranks > 1 else 1
-    prefix = [mpi_bin, "-np", str(nprocs)]
+    prefix = [mpi_bin, "-np", str(ranks)]
+
     # Ensure module/conda runtime env is visible in MPI ranks.
     for key in (
         "PATH",
@@ -220,7 +240,34 @@ def _build_amber_launch(mode, mm_ranks, mpi_bin_opt):
         "AMBER_MLIPS_DEBUG",
     ):
         prefix.extend(["-x", key])
-    return "mpi", prefix, warnings
+
+    return LaunchSpec(mode="mpi", prefix=tuple(prefix))
+
+
+def _build_child_env(base_env, shim_dir, backend, ml_keywords, debug=False):
+    env = dict(base_env)
+    env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
+    env["AMBER_MLIPS_BACKEND"] = str(backend)
+    env["AMBER_MLIPS_ML_KEYWORDS"] = str(ml_keywords)
+    if debug:
+        env["AMBER_MLIPS_DEBUG"] = "1"
+    else:
+        env.pop("AMBER_MLIPS_DEBUG", None)
+    return env
+
+
+def _validate_mm_sander(mm_ranks, sander_bin):
+    if int(mm_ranks) <= 1:
+        return
+
+    sander_name = os.path.basename(str(sander_bin)).lower()
+    if ".mpi" in sander_name:
+        return
+
+    raise AmberMLIPSError(
+        "--mm-ranks > 1 requires an MPI-capable sander binary (e.g., sander.MPI). "
+        "Current binary: {}".format(sander_bin)
+    )
 
 
 def build_parser():
@@ -238,12 +285,6 @@ def build_parser():
         "--mpi-bin",
         default=None,
         help="MPI launcher command/path for MM ranks > 1 (default: auto-detect mpirun/mpiexec).",
-    )
-    parser.add_argument(
-        "--launcher-mode",
-        default="auto",
-        choices=("auto", "mpi", "direct", "dvm"),
-        help="MM launcher: auto(direct for 1 rank, mpi for >1), mpi(force mpi launcher), direct(no mpi launcher).",
     )
     parser.add_argument(
         "--mm-ranks",
@@ -275,6 +316,20 @@ def _print_help(parser):
     )
 
 
+def _print_debug(transformed, transformed_path, launch_spec, mm_ranks, qchem_path):
+    print("[amber-mlips] backend: {}".format(transformed.backend), file=sys.stderr)
+    print("[amber-mlips] transformed input: {}".format(transformed_path), file=sys.stderr)
+    print("[amber-mlips] launcher mode: {}".format(launch_spec.mode), file=sys.stderr)
+    print("[amber-mlips] mm ranks: {}".format(int(mm_ranks)), file=sys.stderr)
+    print("[amber-mlips] qchem shim: {}".format(qchem_path), file=sys.stderr)
+    print(
+        "[amber-mlips] ml_keywords: {}".format(
+            transformed.ml_keywords if transformed.ml_keywords else "(empty)"
+        ),
+        file=sys.stderr,
+    )
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -289,96 +344,66 @@ def main(argv=None):
         _print_help(parser)
         return 2
 
-    generated_input = None
-    transformed_path = None
-    shim_dir = None
-    qchem_path = None
-    subprocess_env = _build_runtime_env()
+    base_env = _build_runtime_env()
 
     try:
-        i_idx, inline_i, user_input = _extract_input_path(forward)
+        with ExitStack() as stack:
+            input_ref = _extract_input_arg(forward)
 
-        with open(user_input, "r") as handle:
-            original_text = handle.read()
+            with open(input_ref.user_path, "r") as handle:
+                original_text = handle.read()
+            transformed = transform_mdin_text(original_text)
 
-        transformed = transform_mdin_text(original_text)
+            for warn in transformed.warnings:
+                print("[amber-mlips] WARNING: {}".format(warn), file=sys.stderr)
 
-        for warn in transformed.warnings:
-            print("[amber-mlips] WARNING: {}".format(warn), file=sys.stderr)
-
-        transformed_path, generated_input = _write_transformed_input(
-            user_input,
-            transformed.transformed_text,
-            keep_file=bool(ns.keep_transformed_input),
-        )
-
-        mm_ranks = int(ns.mm_ranks)
-        if mm_ranks < 1:
-            raise AmberMLIPSError("--mm-ranks must be >= 1.")
-
-        launch_mode, amber_prefix, mode_warnings = _build_amber_launch(
-            ns.launcher_mode,
-            mm_ranks,
-            ns.mpi_bin,
-        )
-        for warn in mode_warnings:
-            print("[amber-mlips] WARNING: {}".format(warn), file=sys.stderr)
-
-        sander_bin = _resolve_sander_bin(ns.sander_bin, prefer_mpi=(mm_ranks > 1))
-        if mm_ranks > 1:
-            sander_name = os.path.basename(str(sander_bin)).lower()
-            if ".mpi" not in sander_name:
-                raise AmberMLIPSError(
-                    "--mm-ranks > 1 requires an MPI-capable sander binary (e.g., sander.MPI). "
-                    "Current binary: {}".format(sander_bin)
-                )
-
-        shim_dir, qchem_path = _stage_qchem_shim()
-        subprocess_env["PATH"] = shim_dir + os.pathsep + subprocess_env.get("PATH", "")
-        subprocess_env["AMBER_MLIPS_BACKEND"] = str(transformed.backend)
-        subprocess_env["AMBER_MLIPS_ML_KEYWORDS"] = str(transformed.ml_keywords)
-        if ns.debug:
-            subprocess_env["AMBER_MLIPS_DEBUG"] = "1"
-
-        forward_exec = _replace_input_path(forward, i_idx, inline_i, transformed_path)
-        amber_cmd = list(amber_prefix) + [sander_bin] + forward_exec
-
-        if ns.debug:
-            print("[amber-mlips] backend: {}".format(transformed.backend), file=sys.stderr)
-            print("[amber-mlips] transformed input: {}".format(transformed_path), file=sys.stderr)
-            print("[amber-mlips] launcher mode: {}".format(launch_mode), file=sys.stderr)
-            print("[amber-mlips] mm ranks: {}".format(mm_ranks), file=sys.stderr)
-            print("[amber-mlips] qchem shim: {}".format(qchem_path), file=sys.stderr)
-            print(
-                "[amber-mlips] ml_keywords: {}".format(
-                    transformed.ml_keywords if transformed.ml_keywords else "(empty)"
-                ),
-                file=sys.stderr,
+            transformed_path = _write_transformed_input(
+                stack=stack,
+                input_path=input_ref.user_path,
+                transformed_text=transformed.transformed_text,
+                keep_file=bool(ns.keep_transformed_input),
             )
 
-        if ns.dry_run:
-            print("[amber-mlips] qchem shim: {}".format(qchem_path), file=sys.stderr)
-            print("[amber-mlips] amber  cmd: {}".format(" ".join(shlex.quote(x) for x in amber_cmd)), file=sys.stderr)
-            return 0
+            launch_spec = _build_launch_spec(ns.mm_ranks, ns.mpi_bin)
+            sander_bin = _resolve_sander_bin(ns.sander_bin, prefer_mpi=(int(ns.mm_ranks) > 1))
+            _validate_mm_sander(ns.mm_ranks, sander_bin)
 
-        proc = subprocess.run(amber_cmd, env=subprocess_env)
-        return int(proc.returncode)
+            shim_dir, qchem_path = _stage_qchem_shim(stack)
+            child_env = _build_child_env(
+                base_env=base_env,
+                shim_dir=shim_dir,
+                backend=transformed.backend,
+                ml_keywords=transformed.ml_keywords,
+                debug=bool(ns.debug),
+            )
+
+            forward_exec = _replace_input_path(forward, input_ref, transformed_path)
+            amber_cmd = list(launch_spec.prefix) + [sander_bin] + forward_exec
+
+            if ns.debug:
+                _print_debug(
+                    transformed=transformed,
+                    transformed_path=transformed_path,
+                    launch_spec=launch_spec,
+                    mm_ranks=ns.mm_ranks,
+                    qchem_path=qchem_path,
+                )
+
+            if ns.dry_run:
+                print("[amber-mlips] qchem shim: {}".format(qchem_path), file=sys.stderr)
+                print(
+                    "[amber-mlips] amber  cmd: {}".format(
+                        " ".join(shlex.quote(x) for x in amber_cmd)
+                    ),
+                    file=sys.stderr,
+                )
+                return 0
+
+            return int(subprocess.run(amber_cmd, env=child_env).returncode)
 
     except (InputTransformError, AmberMLIPSError, OSError, subprocess.SubprocessError) as exc:
         print("[amber-mlips] ERROR: {}".format(exc), file=sys.stderr)
         return 1
-
-    finally:
-        if generated_input and os.path.exists(generated_input):
-            try:
-                os.unlink(generated_input)
-            except OSError:
-                pass
-        if shim_dir and os.path.isdir(shim_dir):
-            try:
-                shutil.rmtree(shim_dir)
-            except OSError:
-                pass
 
 
 if __name__ == "__main__":
