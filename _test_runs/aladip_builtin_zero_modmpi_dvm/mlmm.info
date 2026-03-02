@@ -1,0 +1,19 @@
+
+ NSTEP =        2   TIME(PS) =       0.501  TEMP(K) =   311.96  PRESS =     0.0
+ Etot   =        14.4791  EKtot   =        20.4576  EPtot      =        -5.9785
+ BOND   =         3.3996  ANGLE   =         3.6358  DIHED      =        10.4225
+ 1-4 NB =         3.2490  1-4 EEL =       -10.6981  VDWAALS    =        -0.9288
+ EELEC  =       -15.0585  EHBOND  =         0.0000  RESTRAINT  =         0.0000
+ EXTERNESCF=         0.0000
+
+| Final Performance Info:
+| -----------------------------------------------------
+| Average timings for last       1 steps:
+|     Elapsed(s) =       0.00 Per Step(ms) =       1.58
+|         ps/day =  27323.220   seconds/ps =       3.16
+|
+| Average timings for all steps:
+|     Elapsed(s) =       0.02 Per Step(ms) =      10.31
+|         ps/day =   4190.715   seconds/ps =      20.62
+| -----------------------------------------------------
+

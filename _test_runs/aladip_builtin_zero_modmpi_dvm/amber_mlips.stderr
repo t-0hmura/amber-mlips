@@ -1,0 +1,14 @@
+[amber-mlips] backend: uma
+[amber-mlips] transformed input: /tmp/amber_mlips_h1o_ck_j.in
+[amber-mlips] launcher mode: dvm
+[amber-mlips] started DVM pid=1986766 uri=prte-jomon01-1986766@0.0;tcp4://127.0.0.1:47087
+[amber-mlips-server] Published qc_program_port on 224198657.0:424288150
+[amber-mlips] dvm    cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prte --daemonize --report-uri /tmp/amber_mlips_dvm_e4vv2q6i.uri --report-pid /tmp/amber_mlips_dvm_9exx60ln.pid
+[amber-mlips] server cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prun --dvm-uri file:/tmp/amber_mlips_dvm_e4vv2q6i.uri -n 1 /home/tohmura/miniconda3/envs/amber_mlips_modmpi/bin/python -m amber_mlips_plugins.genmpi_server --backend uma --service-name qc_program_port --ready-file /tmp/amber_mlips_ready_y3m4qlq_.flag --debug --model builtin:zero
+[amber-mlips] amber  cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prun --dvm-uri file:/tmp/amber_mlips_dvm_e4vv2q6i.uri -n 1 /home/apps/amber24/bin/sander.MPI -O -i /tmp/amber_mlips_h1o_ck_j.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7 -x mlmm.nc -inf mlmm.info
+[amber-mlips-server] AMBER connected.
+[amber-mlips-server] Received initial job info rows: methodUMA; basisMLIP; jbasisnone; cbasisnone; scfconv1E-08; scfiter100; guessread; gridnone
+[amber-mlips-server] step: nq=12 ncl=10 E=0.0000000000 Eh
+[amber-mlips-server] step: nq=12 ncl=10 E=0.0000000000 Eh
+[amber-mlips-server] Received finalize tag=0.
+[jomon01:1986788] OPAL ERROR: Server not available in file dpm/dpm.c at line 667

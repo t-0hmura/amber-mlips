@@ -1,0 +1,7 @@
+[amber-mlips] WARNING: qm_ewald was set to 0 because qm_theory=EXTERN requires qm_ewald=0 in AMBER.
+[amber-mlips] backend: aimnet2
+[amber-mlips] transformed input: /data2/tohmura/mlmm_workspace/MLIP_Plugin/amber-mlips/_test_runs/aladip_builtin_zero_modmpi_dvm/mlmm_embed.in.amber_mlips.genmpi.in
+[amber-mlips] launcher mode: dvm
+[amber-mlips] dvm    cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prte --daemonize --report-uri /tmp/amber_mlips_dryrun.dvm.uri --report-pid /tmp/amber_mlips_dryrun.dvm.pid
+[amber-mlips] server cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prun --dvm-uri file:/tmp/amber_mlips_dryrun.dvm.uri -n 1 /home/tohmura/miniconda3/envs/amber_mlips_modmpi/bin/python -m amber_mlips_plugins.genmpi_server --backend aimnet2 --service-name qc_program_port --ready-file /tmp/amber_mlips_dryrun.ready --debug --model aimnet2 --embedcharge --xtb-cmd xtb --xtb-ncores 2
+[amber-mlips] amber  cmd: /home/apps/openmpi/5.0.3_gcc13.3.0/bin/prun --dvm-uri file:/tmp/amber_mlips_dryrun.dvm.uri -n 1 /home/apps/amber24/bin/sander.MPI -O -i /data2/tohmura/mlmm_workspace/MLIP_Plugin/amber-mlips/_test_runs/aladip_builtin_zero_modmpi_dvm/mlmm_embed.in.amber_mlips.genmpi.in -o dry.out -p leap.parm7 -c md.rst7 -r dry.rst7 -x dry.nc -inf dry.info

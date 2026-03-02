@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amber-mlips"
+dynamic = ["version"]
+description = "MLIP plugin wrapper for AMBER QM/MM via EXTERN+genmpi"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "ase",
+    "mpi4py",
+]
+
+[project.optional-dependencies]
+uma = ["torch>=2.8.0", "fairchem-core>=2.13"]
+orb = ["torch>=2.8.0", "orb-models"]
+mace = ["torch>=2.8.0", "mace-torch"]
+aimnet2 = ["torch>=2.8.0", "aimnet"]
+
+[project.scripts]
+amber-mlips = "amber_mlips_plugins.cli_amber:main"
+amber-mlips-server = "amber_mlips_plugins.genmpi_server:main"
+
+[tool.setuptools]
+packages = ["amber_mlips_plugins"]
+include-package-data = false
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+fallback_version = "0.1.0"
+
+[tool.setuptools.package-dir]
+amber_mlips_plugins = "plugins"
