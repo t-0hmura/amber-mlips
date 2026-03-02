@@ -136,7 +136,6 @@ _QMMM_RE = re.compile(
     re.MULTILINE,
 )
 
-_GENMPI_RE = re.compile(r"(?ims)^[ \t]*&genmpi\b.*?^[ \t]*/[ \t]*\n?", re.MULTILINE)
 _QC_RE = re.compile(r"(?ims)^[ \t]*&qc\b.*?^[ \t]*/[ \t]*\n?", re.MULTILINE)
 
 
@@ -223,7 +222,6 @@ def transform_mdin_text(text):
     new_qmmm = _build_qmmm_block(order, values, key_style)
 
     rewritten = text[: match.start()] + new_qmmm + text[match.end() :]
-    rewritten = _GENMPI_RE.sub("", rewritten)
     rewritten = _QC_RE.sub("", rewritten)
 
     if not rewritten.endswith("\n"):

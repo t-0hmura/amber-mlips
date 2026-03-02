@@ -16,7 +16,6 @@ Supported backend selectors (`&qmmm: qm_theory`):
 - Input style remains AMBER-native except two plugin keys:
   - `qm_theory="uma|orb|mace|aimnet2"`
   - `ml_keywords="..."`
-- Non-MPI ML path (`qchem` shim); no `genmpi`/MPI name-service dependency.
 - MM side can still use MPI ranks via `--mm-ranks`.
 
 ## Installation
@@ -87,7 +86,6 @@ Before launching AMBER, `amber-mlips` transforms input as follows:
 - `qm_theory` -> `'EXTERN'`
 - remove `ml_keywords`
 - force `qm_ewald=0` and `qmgb=0` (EXTERN constraints)
-- remove existing `&genmpi`/`&qc` blocks
 - append generated `&qc`
 
 Inspect transformed input with:

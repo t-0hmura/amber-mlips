@@ -14,7 +14,7 @@
 6. Launch AMBER (`sander` or `sander.MPI`) with transformed mdin.
 7. Clean temporary transformed input and shim directory.
 
-There is no MPI name-service process and no `genmpi` server in this runtime path.
+There is no MPI name-service process in this runtime path.
 
 ## mdin Transform Rules
 
@@ -24,7 +24,7 @@ There is no MPI name-service process and no `genmpi` server in this runtime path
 - Extract `ml_keywords` (used only by shim, not passed to AMBER `&qmmm`).
 - Rewrite `qm_theory -> 'EXTERN'`.
 - Force `qm_ewald=0` and `qmgb=0`.
-- Remove pre-existing `&genmpi` and `&qc` blocks.
+- Remove pre-existing `&qc` blocks.
 - Append generated `&qc` block.
 
 Only transformed mdin is passed to AMBER.

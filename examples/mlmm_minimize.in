@@ -1,0 +1,19 @@
+QM/MM energy minimization with amber-mlips
+&cntrl
+  imin=1,
+  maxcyc=100,
+  ncyc=50,
+  ntb=0,
+  ntpr=10,
+  ifqnt=1,
+/
+&qmmm
+  qmmask="@1,2,3",
+  qmcharge=0,
+  spin=1,
+  qm_theory="uma",
+  ml_keywords="--model uma-s-1p1",
+  qmcut=12.0,
+  qmshake=0,
+  qm_pme=0,
+/

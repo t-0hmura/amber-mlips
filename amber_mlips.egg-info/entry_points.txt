@@ -1,2 +1,0 @@
-[console_scripts]
-amber-mlips = amber_mlips_plugins.cli_amber:main
