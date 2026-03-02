@@ -1,136 +1,175 @@
 # amber-mlips
 
-`amber-mlips` is a single-command wrapper for **AMBER QM/MM** with MLIP backends.
-It keeps a `sander`-style CLI and internally uses AMBER `qm_theory='EXTERN'` with `&qc`
-through a private non-MPI `qchem` shim.
+MLIP (Machine Learning Interatomic Potential) wrapper for **AMBER QM/MM** via `sander` `EXTERN` interface.
 
-Supported backend selectors (`&qmmm: qm_theory`):
-- `uma`
-- `orb`
-- `mace`
-- `aimnet2`
+Four model families are currently supported:
+- **UMA** ([fairchem](https://github.com/facebookresearch/fairchem)) — default model: `uma-s-1p1`
+- **ORB** ([orb-models](https://github.com/orbital-materials/orb-models)) — default model: `orb_v3_conservative_omol`
+- **MACE** ([mace](https://github.com/ACEsuit/mace)) — default model: `MACE-OMOL-0`
+- **AIMNet2** ([aimnetcentral](https://github.com/isayevlab/aimnetcentral)) — default model: `aimnet2`
 
-## Features
+All backends provide energy and gradient for AMBER QM/MM molecular dynamics and optimization.
+An optional **point-charge embedding** correction (`xTB`) is available via `--embedcharge`.
 
-- Single command: `amber-mlips ...` (no external server command required).
-- Input style remains AMBER-native except two plugin keys:
-  - `qm_theory="uma|orb|mace|aimnet2"`
-  - `ml_keywords="..."`
-- MM side can still use MPI ranks via `--mm-ranks`.
+> `amber-mlips` wraps `sander` so that a single command handles everything — no external server or separate process needed.
 
-## Installation
+Requires **Python 3.9** or later and **AMBER** (`sander`).
 
-Install core package:
+> For Gaussian 16 users, see: https://github.com/t-0hmura/g16-mlips
+
+## Quick Start (Default = UMA)
+
+1. Install PyTorch suitable for your CUDA environment.
 ```bash
-pip install amber-mlips
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 ```
 
-Install with backend extras:
+2. Install the package with the UMA backend. For ORB/MACE/AIMNet2, replace `uma` accordingly.
 ```bash
 pip install "amber-mlips[uma]"
-pip install "amber-mlips[orb]"
-pip install "amber-mlips[mace]"
-pip install "amber-mlips[aimnet2]"
 ```
 
-Local editable install:
+3. Log in to Hugging Face for UMA model access. (Not required for ORB/MACE/AIMNet2)
 ```bash
-cd amber-mlips
-pip install -e . --no-deps
+huggingface-cli login
 ```
 
-## Quick Start
-
-1. Prepare AMBER input (`mlmm.in`):
+4. Prepare an AMBER input file. Only `qm_theory` and `ml_keywords` are plugin-specific; everything else is native AMBER `&qmmm`.
 ```text
-&qmmm
-  qmmask="@1,2,3",
+ &cntrl
+  imin=0, irest=1, ntx=5,
+  nstlim=1000, dt=0.001,
+  ntb=0, ntt=3, gamma_ln=5.0,
+  ntpr=10, ntwx=10, ntwr=100,
+  ifqnt=1,
+ /
+ &qmmm
+  qmmask=':2',
   qmcharge=0,
   spin=1,
-  qm_theory="uma",
-  ml_keywords="--model uma-s-1p1 --embedcharge",
+  qm_theory='uma',
+  ml_keywords='--model uma-s-1p1',
   qmcut=12.0,
-/
+  qmshake=0,
+  qm_ewald=0,
+  qm_pme=0,
+ /
 ```
 
-2. Run with standard `sander` flags:
+Other backends:
+```text
+  qm_theory='orb',    ml_keywords='--model orb-v3',
+  qm_theory='mace',   ml_keywords='--model mace-mp-0-large',
+  qm_theory='aimnet2', ml_keywords='--model aimnet2',
+```
+
+5. Run with standard `sander` flags.
 ```bash
 amber-mlips -O \
-  -i mlmm.in \
-  -o mlmm.out \
-  -p leap.parm7 \
-  -c md.rst7 \
-  -r mlmm.rst7 \
-  -ref leap.parm7 \
-  -x mlmm.nc \
-  -inf mlmm.info
+  -i mlmm.in -o mlmm.out \
+  -p leap.parm7 -c md.rst7 \
+  -r mlmm.rst7 -x mlmm.nc -inf mlmm.info
 ```
 
-3. MM MPI parallelism (CPU side):
+## Point-Charge Embedding Correction (xTB)
+
+`--embedcharge` adds an xTB-based correction for electrostatic embedding of MM point charges into the QM region.
+
+Install xTB:
+```bash
+conda install xtb
+```
+
+Use `--embedcharge` in `ml_keywords`:
+```text
+  ml_keywords='--model uma-s-1p1 --embedcharge',
+```
+
+This computes `dE = E_xTB(embed) - E_xTB(no-embed)` and adds the correction to MLIP energy and forces.
+
+## MM MPI Parallelism
+
+The ML evaluation path is always single-process. The MM side (`sander`) can use MPI:
+
 ```bash
 amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7
 ```
 
-## Input Semantics
+- `--mm-ranks 1` (default): runs `sander` directly.
+- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`.
 
-In `&qmmm`, only these keys are plugin-specific:
-- `qm_theory` (`uma|orb|mace|aimnet2`)
-- `ml_keywords` (backend options string)
+## Installing Model Families
 
-Everything else follows native AMBER behavior.
-Use `qmcut` directly; no `mlcut` alias is used.
-
-## Internal Transform
-
-Before launching AMBER, `amber-mlips` transforms input as follows:
-- `qm_theory` -> `'EXTERN'`
-- remove `ml_keywords`
-- force `qm_ewald=0` and `qmgb=0` (EXTERN constraints)
-- append generated `&qc`
-
-Inspect transformed input with:
 ```bash
-amber-mlips --keep-transformed-input ...
+pip install "amber-mlips[uma]"         # UMA (default)
+pip install "amber-mlips[orb]"         # ORB
+pip install "amber-mlips[mace]"        # MACE
+pip install "amber-mlips[aimnet2]"     # AIMNet2
+pip install amber-mlips                # core only (no ML backend)
 ```
 
-## `ml_keywords`
+> **Note:** UMA and MACE have a dependency conflict (`e3nn`). Use separate environments.
 
-`ml_keywords` is parsed like shell tokens and passed to the internal qchem shim.
-Common options:
-- `--model <name_or_alias_or_path>`
-- `--device auto|cpu|cuda`
-- `--embedcharge`
-- `--xtb-cmd <path_or_cmd>`
-- `--xtb-ncores <int>`
-- `--debug`
-
-Example:
-```text
-ml_keywords="--model uma-s-1p1 --embedcharge --xtb-cmd xtb --xtb-ncores 4"
+Local install:
+```bash
+git clone https://github.com/t-0hmura/amber-mlips.git
+cd amber-mlips
+pip install -e ".[uma]"
 ```
 
-## Launcher Behavior
+Model download notes:
+- **UMA**: Hosted on Hugging Face Hub. Run `huggingface-cli login` once.
+- **ORB / MACE / AIMNet2**: Downloaded automatically on first use.
 
-- ML path is non-MPI by design.
-- MM side launch is controlled by `--mm-ranks` only.
-- Launch policy is fixed to auto:
-  - `--mm-ranks 1`: direct `sander`
-  - `--mm-ranks > 1`: MPI launcher + `sander.MPI`
-- Optional override for launcher binary: `--mpi-bin`.
+## Examples
 
-## Smoke-Test Models
+Ready-to-run examples are in the [`examples/`](examples/) directory with an alanine dipeptide test system.
 
-For lightweight integration tests:
-- `--model builtin:zero`
-- `--model builtin:harmonic`
-- `--model builtin:harmonic:<k>`
+```bash
+cd examples
+./run.sh uma          # UMA
+./run.sh orb          # ORB
+./run.sh mace         # MACE
+./run.sh embedcharge  # UMA + embedcharge
+./run.sh minimize     # energy minimization
+./run.sh all          # all of the above
+```
 
-## Notes
+## Upstream Model Sources
 
-- UMA models may require Hugging Face authentication (`huggingface-cli login`).
-- `--embedcharge` requires `xtb` installed and reachable.
+- UMA / FAIR-Chem: https://github.com/facebookresearch/fairchem
+- ORB / orb-models: https://github.com/orbital-materials/orb-models
+- MACE: https://github.com/ACEsuit/mace
+- AIMNet2: https://github.com/isayevlab/aimnetcentral
+
+## Advanced Options
+
+See [`OPTIONS.md`](OPTIONS.md) for all wrapper and backend-specific options.
+
+## Troubleshooting
+
+- **`amber-mlips` command not found** — Activate the conda/venv environment where the package is installed.
+- **`sander` not found** — Set `AMBERHOME` or use `--sander-bin /path/to/sander`.
+- **UMA model download fails (401/403)** — Run `huggingface-cli login`. Some models require access approval on Hugging Face.
+- **MPI errors with `--mm-ranks > 1`** — Ensure `sander.MPI` is built and `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
+- **Works interactively but fails in batch jobs** — Use `--sander-bin` with an absolute path.
 
 ## More Docs
 
-- Wrapper and keyword options: [`OPTIONS.md`](OPTIONS.md)
-- Implementation details: [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md)
+- All options: [`OPTIONS.md`](OPTIONS.md)
+- Internal architecture: [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md)
+
+## Citation
+
+If you use this package, please cite:
+
+```bibtex
+@software{ohmura2026ambermlips,
+  author       = {Ohmura, Takuto},
+  title        = {amber-mlips},
+  year         = {2026},
+  version      = {1.0.0},
+  url          = {https://github.com/t-0hmura/amber-mlips},
+  license      = {MIT}
+}
+```

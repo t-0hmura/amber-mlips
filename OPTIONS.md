@@ -1,79 +1,129 @@
 # amber-mlips Options
 
-## Wrapper Options (`amber-mlips`)
+For most users, defaults are sufficient.
 
-Wrapper options are consumed by `amber-mlips`; all unrecognized flags are forwarded to `sander`.
+> **Note:** UMA and MACE currently have a dependency conflict (`e3nn`). Use separate environments.
 
-- `--sander-bin <path>`: explicit AMBER executable.
-- `--mpi-bin <path_or_cmd>`: MPI launcher for MM ranks > 1 (default auto-detect `mpirun`/`mpiexec`).
-- `--mm-ranks <int>`: MM-side rank count.
-- `--keep-transformed-input`: save transformed mdin as `<input>.amber_mlips.qc.in`.
-- `--dry-run`: print transformed command and exit.
-- `--debug`: verbose wrapper/shim logs.
-- `-h`, `--help`: print help.
+## Wrapper Options
+
+These are consumed by the `amber-mlips` command; all other flags are forwarded to `sander`.
+
+| Option | Description |
+|--------|-------------|
+| `--sander-bin <path>` | Explicit path to `sander` or `sander.MPI` (default: auto-detect via `AMBERHOME` / `PATH`) |
+| `--mpi-bin <path>` | MPI launcher for `--mm-ranks > 1` (default: auto-detect `mpirun` / `mpiexec`) |
+| `--mm-ranks <int>` | MPI rank count for MM side (default: `1`) |
+| `--keep-transformed-input` | Save transformed mdin as `<input>.amber_mlips.qc.in` for inspection |
+| `--dry-run` | Print resolved command without running `sander` |
+| `--debug` | Verbose wrapper and shim logs |
+| `-h`, `--help` | Print help |
 
 Typical use:
 ```bash
 amber-mlips [wrapper-options] -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 ...
 ```
 
-MM launch behavior is fixed to auto:
-- `--mm-ranks 1` => direct `sander`
-- `--mm-ranks > 1` => MPI launcher + `sander.MPI`
+## Input File (`&qmmm`)
 
-## User `&qmmm` Fields
+Plugin-specific fields in `&qmmm`:
 
-Plugin-specific fields:
-- `qm_theory="uma"|"orb"|"mace"|"aimnet2"` (required)
-- `ml_keywords="..."` (optional, usually required)
+| Field | Description |
+|-------|-------------|
+| `qm_theory` | Backend selector: `uma`, `orb`, `mace`, or `aimnet2` (required) |
+| `ml_keywords` | Backend option string (see below) |
 
-On transform:
-- `qm_theory` is rewritten to `'EXTERN'`
-- `ml_keywords` is removed before AMBER run
-- `qm_ewald` and `qmgb` are forced to `0`
-- generated `&qc` is appended
+All other `&qmmm` fields (`qmmask`, `qmcharge`, `spin`, `qmcut`, etc.) follow native AMBER behavior.
 
-All other `&qmmm` fields remain AMBER-native (`qmcut` etc.).
+On launch, `amber-mlips` transforms the input:
+- `qm_theory` → `'EXTERN'`
+- `ml_keywords` is removed (consumed by shim)
+- `qm_ewald=0` and `qmgb=0` are forced (EXTERN constraint)
+- A generated `&qc` block is appended
 
-## `ml_keywords` Options
+## `ml_keywords` — Common Options
 
-`ml_keywords` is parsed with shell token rules (`shlex.split`) and consumed by the qchem shim.
+`ml_keywords` is parsed with shell token rules and passed to the internal `qchem` shim.
 
-Common options:
-- `--model <name_or_alias_or_path>`
-- `--device auto|cpu|cuda`
-- `--embedcharge`
-- `--xtb-cmd <path_or_cmd>`
-- `--xtb-acc <float>` (default: `0.2`)
-- `--xtb-workdir <tmp|path>` (default: `tmp`)
-- `--xtb-keep-files`
-- `--xtb-ncores <int>` (default: `1`)
-- `--debug`
+| Option | Description |
+|--------|-------------|
+| `--model <name>` | Model name, alias, or local path |
+| `--device auto\|cpu\|cuda` | Compute device (default: `auto`) |
+| `--embedcharge` | Enable xTB point-charge embedding correction |
+| `--xtb-cmd <path>` | xTB executable (default: `xtb`) |
+| `--xtb-acc <float>` | xTB accuracy parameter (default: `0.2`) |
+| `--xtb-ncores <int>` | CPU cores for xTB (default: `1`) |
+| `--xtb-workdir <tmp\|path>` | xTB scratch directory (default: `tmp`) |
+| `--xtb-keep-files` | Keep xTB temporary files for debugging |
+| `--debug` | Verbose shim logs |
 
-Backend-specific options:
+## UMA Options
 
-### UMA
-- `--uma-task <omol|omat|odac|oc20|oc25|omc>`
-- `--uma-workers <int>`
+Available models (default: **`uma-s-1p1`**):
 
-### ORB
-- `--orb-precision <str>` (default: `float32`)
-- `--orb-compile`
+| Model | Description |
+|-------|-------------|
+| `uma-s-1p1` | Small model, fastest while still SOTA on most benchmarks (6.6M/150M active/total params) |
+| `uma-m-1p1` | Best across all metrics, slower and more memory-intensive (50M/1.4B active/total params) |
 
-### MACE
-- `--mace-default-dtype <float32|float64>` (default: `float32`)
+Models are hosted on Hugging Face Hub (`huggingface-cli login` required).
 
-### AIMNet2
-- no extra backend-specific flags in current CLI
+| Option | Description |
+|--------|-------------|
+| `--uma-task <omol\|omat\|odac\|oc20\|oc25\|omc>` | Task head selector |
+| `--uma-workers <int>` | Predictor worker count |
 
-## Builtin Test Models
+## ORB Options
 
-For integration checks without external ML packages:
-- `--model builtin:zero`
-- `--model builtin:harmonic`
-- `--model builtin:harmonic:<k>`
+Only conservative ORB models are supported. Underscores and dashes are interchangeable.
 
-Example:
-```text
-ml_keywords="--model builtin:zero"
-```
+Available models (default: **`orb_v3_conservative_omol`**):
+
+| Model | Dataset |
+|-------|---------|
+| `orb-v3-conservative-omol` | OMol25 (molecules) |
+| `orb-v3-conservative-20-omat` | OMAT (materials, max 20 neighbors) |
+| `orb-v3-conservative-inf-omat` | OMAT (materials, unlimited neighbors) |
+| `orb-v3-conservative-20-mpa` | MPA (materials, max 20 neighbors) |
+| `orb-v3-conservative-inf-mpa` | MPA (materials, unlimited neighbors) |
+
+Models are downloaded automatically on first use.
+
+| Option | Description |
+|--------|-------------|
+| `--orb-precision <str>` | Float precision (default: `float32`) |
+| `--orb-compile` | Enable `torch.compile` for the model |
+
+## MACE Options
+
+Available models (default: **`MACE-OMOL-0`**):
+
+| Model | Description |
+|-------|-------------|
+| `MACE-OMOL-0` | OMOL large model for molecules and transition metals |
+| `mp:small`, `mp:medium`, `mp:large` | MACE-MP-0 (Materials Project, 89 elements) |
+| `mp:medium-0b3` | MACE-MP-0b3, improved high-pressure stability |
+| `mp:medium-mpa-0` | MACE-MPA-0, MPTrj + sAlex |
+| `mp:small-omat-0`, `mp:medium-omat-0` | MACE-OMAT-0 |
+| `off:small`, `off:medium`, `off:large` | MACE-OFF23 for organic molecules |
+
+Models are downloaded automatically on first use.
+
+| Option | Description |
+|--------|-------------|
+| `--mace-default-dtype <float32\|float64>` | Float precision (default: `float32`) |
+
+## AIMNet2 Options
+
+Available models (default: **`aimnet2`**):
+
+| Model | Description |
+|-------|-------------|
+| `aimnet2` | AIMNet2 base model |
+| `aimnet2_b973c` | AIMNet2 with B97-3c functional |
+| `aimnet2_2025` | AIMNet2 B97-3c + improved intermolecular interactions |
+| `aimnet2nse` | AIMNet2 open-shell model |
+| `aimnet2pd` | AIMNet2 for Pd-containing systems |
+
+Models are downloaded automatically on first use. A local checkpoint path or URL can also be specified.
+
+No additional backend-specific options.

@@ -5,10 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "amber-mlips"
 dynamic = ["version"]
-description = "MLIP plugin wrapper for AMBER QM/MM via EXTERN+qc (non-MPI shim)"
+description = "MLIP wrapper for AMBER QM/MM (UMA, ORB, MACE, AIMNet2)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
+authors = [
+    { name = "Ohmura Takuto" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
 dependencies = [
     "numpy",
     "ase",

@@ -1,19 +1,22 @@
-QM/MM energy minimization with amber-mlips
-&cntrl
-  imin=1,
-  maxcyc=100,
-  ncyc=50,
-  ntb=0,
-  ntpr=10,
-  ifqnt=1,
-/
-&qmmm
-  qmmask="@1,2,3",
+Alanine dipeptide QM/MM energy minimization with UMA
+ &cntrl
+  imin   = 1,
+  maxcyc = 20,
+  ncyc   = 10,
+  cut    = 9999.9,
+  ntb    = 0,
+  ntpr   = 1,
+  ioutfm = 1,
+  ntxo   = 1,
+  ifqnt  = 1,
+ /
+ &qmmm
+  qmmask=':2',
   qmcharge=0,
   spin=1,
-  qm_theory="uma",
-  ml_keywords="--model uma-s-1p1",
-  qmcut=12.0,
+  qm_theory='uma',
+  ml_keywords='--model uma-s-1p1',
   qmshake=0,
+  qm_ewald=0,
   qm_pme=0,
-/
+ /

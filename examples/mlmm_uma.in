@@ -1,24 +1,28 @@
-UMA QM/MM MD with amber-mlips
-&cntrl
-  imin=0,
-  irest=1,
-  ntx=5,
-  nstlim=10,
-  dt=0.0005,
-  ntb=0,
-  ntt=0,
-  ntpr=1,
-  ntwx=1,
-  ntwr=10,
-  ifqnt=1,
-/
-&qmmm
-  qmmask="@1,2,3",
+Alanine dipeptide QM/MM MD with UMA
+ &cntrl
+  imin   = 0,
+  irest  = 1,
+  ntx    = 5,
+  cut    = 9999.9,
+  dt     = 0.0005,
+  ntb    = 0,
+  ntt    = 0,
+  ntpr   = 1,
+  ntwx   = 1,
+  ntwr   = 5,
+  nstlim = 5,
+  nscm   = 0,
+  ioutfm = 1,
+  ntxo   = 1,
+  ifqnt  = 1,
+ /
+ &qmmm
+  qmmask=':2',
   qmcharge=0,
   spin=1,
-  qm_theory="uma",
-  ml_keywords="--model uma-s-1p1",
-  qmcut=12.0,
+  qm_theory='uma',
+  ml_keywords='--model uma-s-1p1',
   qmshake=0,
+  qm_ewald=0,
   qm_pme=0,
-/
+ /

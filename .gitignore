@@ -3,31 +3,20 @@ __pycache__/
 *.pyo
 *.swp
 .DS_Store
-*.log
-*.out
-*.err
 
 # Build / dist
 build/
 dist/
 *.egg-info/
 
-# AMBER output files
-*.rst7
-*.nc
-*.mdinfo
-*.info
-
-# Test / runtime artifacts
-_test_runs/
-_runtime_libs/
-tmp_real_mlip_*/
-
 # Example output files
+examples/_output/
 examples/*.out
 examples/*.rst7
 examples/*.nc
 examples/*.info
-examples/*.mdinfo
+examples/*.log
 
+# Misc
+tmp_real_mlip_*/
 run.sh
