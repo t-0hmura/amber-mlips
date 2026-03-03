@@ -26,7 +26,7 @@
   qmcharge=0,        ! Net charge of ML region
   spin=1,            ! Spin multiplicity of ML region
   qm_theory='uma',   ! ML method (amber-mlips backend)
-  ml_keywords='--model uma-s-1p1 --embedcharge --xtb-ncores 16', ! amber-mlips backend options (xTB point-charge embedding)
+  ml_keywords='--model uma-s-1p1 --embedcharge --xtb-ncores 8', ! amber-mlips backend options (xTB point-charge embedding)
   qmshake=0,         ! No SHAKE on ML region bonds
   qmcut=12.0,        ! QM/MM electrostatic cutoff (Angstroms)
  /
