@@ -1,8 +1,8 @@
 1il4 ligand QM/MM MD with ORB (50 steps)
  &cntrl
   imin=0,            ! Run molecular dynamics (no minimization)
-  irest=0,           ! Do NOT restart, start new simulation
-  ntx=1,             ! Read coordinates only, no velocities
+  irest=1,           ! Restart simulation
+  ntx=5,             ! Read coordinates and velocities
   dt=0.0005,         ! Time step in ps (0.5 fs)
   nstlim=50,         ! Number of MD steps
   ntc=1, ntf=1,      ! No SHAKE bond constraints; compute all interactions
