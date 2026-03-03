@@ -96,6 +96,28 @@ amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r 
 - `--mm-ranks 1` (default): runs `sander` directly.
 - `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`.
 
+### AMBER EXTERN MPI Bug (Auto-Patched)
+
+AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` where non-rank-0
+MPI tasks return without initialising output arrays, corrupting forces in
+multi-rank EXTERN QM/MM runs. This is an **upstream AMBER bug** affecting all
+EXTERN backends, not specific to amber-mlips.
+
+When `--mm-ranks > 1` is used, amber-mlips **automatically** handles this:
+
+1. Checks the AMBER source for the bug.
+2. If found, builds a patched `sander.MPI` and caches it in `~/.amber-mlips/`.
+3. Uses the patched binary for subsequent runs (no rebuild needed).
+
+If a future AMBER version fixes the bug, the patch is skipped automatically.
+
+**Requirements for auto-patching:**
+- AMBER source directory accessible (set `AMBERHOME`; source is located via `${AMBERHOME}_src` or sibling directories)
+- Fortran compiler used to build AMBER available in `PATH`
+
+If auto-patching cannot locate the source, an error message explains alternatives
+(`--mm-ranks 1` or `--sander-bin /path/to/patched/sander.MPI`).
+
 ## Installing Model Families
 
 ```bash

@@ -455,6 +455,11 @@ def main(argv=None):
             sander_bin = _resolve_sander_bin(ns.sander_bin, prefer_mpi=(int(ns.mm_ranks) > 1))
             _validate_mm_sander(ns.mm_ranks, sander_bin)
 
+            # Auto-detect and patch AMBER EXTERN MPI bug for multi-rank runs.
+            if int(ns.mm_ranks) > 1 and not ns.sander_bin:
+                from .sander_patch import ensure_patched_sander
+                sander_bin = ensure_patched_sander(sander_bin)
+
             shim_dir, qchem_path = _stage_qchem_shim(stack)
 
             # Start persistent model server (loads model once).
