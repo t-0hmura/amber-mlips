@@ -15,16 +15,19 @@ Internally:
 from __future__ import absolute_import, division, print_function
 
 import argparse
+import hashlib
 import os
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import ExitStack
 from dataclasses import dataclass
 
 from .mdin_transform import InputTransformError, transform_mdin_text
+from .mlip_server import MLIPServer, ensure_server, send_shutdown, server_is_alive
 
 
 class AmberMLIPSError(RuntimeError):
@@ -53,24 +56,8 @@ def _is_executable(path):
 
 
 def _build_runtime_env():
-    """Return subprocess environment with practical OpenMPI defaults."""
+    """Return subprocess environment."""
     env = os.environ.copy()
-    env.setdefault("OMPI_MCA_mca_base_component_show_load_errors", "none")
-    env.setdefault("OMPI_MCA_opal_warn_on_missing_libcuda", "0")
-    if "OMPI_MCA_opal_cuda_support" not in env and not os.path.exists("/dev/nvidiactl"):
-        env["OMPI_MCA_opal_cuda_support"] = "0"
-
-    # Some environments only provide libcudart through conda.
-    conda_prefix = env.get("CONDA_PREFIX", "").strip()
-    if conda_prefix:
-        conda_lib = os.path.join(conda_prefix, "lib")
-        cudart_link = os.path.join(conda_lib, "libcudart.so.12")
-        if os.path.isfile(cudart_link):
-            ld = env.get("LD_LIBRARY_PATH", "")
-            paths = [p for p in ld.split(os.pathsep) if p]
-            if conda_lib not in paths:
-                env["LD_LIBRARY_PATH"] = conda_lib + (os.pathsep + ld if ld else "")
-
     return env
 
 
@@ -220,6 +207,15 @@ def _stage_qchem_shim(stack):
     return runtime_dir, qchem_path
 
 
+def _shm_available_bytes():
+    """Return available bytes on /dev/shm, or None if unknown."""
+    try:
+        st = os.statvfs("/dev/shm")
+        return st.f_bavail * st.f_frsize
+    except OSError:
+        return None
+
+
 def _build_launch_spec(mm_ranks, mpi_bin_opt):
     ranks = int(mm_ranks)
     if ranks < 1:
@@ -231,12 +227,27 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
     mpi_bin = _resolve_mpi_launcher(mpi_bin_opt)
     prefix = [mpi_bin, "-np", str(ranks)]
 
+    # If /dev/shm is too small for shared-memory transport, fall back to
+    # pipe-based communication.  OpenMPI 5.x needs ~16 MB per rank.
+    shm_avail = _shm_available_bytes()
+    shm_needed = ranks * 16 * 1024 * 1024
+    if shm_avail is not None and shm_avail < shm_needed:
+        print(
+            "[amber-mlips] /dev/shm too small ({:.0f} MB free, {:.0f} MB needed). "
+            "Disabling shared-memory transport.".format(
+                shm_avail / 1e6, shm_needed / 1e6
+            ),
+            file=sys.stderr, flush=True,
+        )
+        prefix.extend(["--mca", "smsc", "^knem,cma,xpmem"])
+
     # Ensure module/conda runtime env is visible in MPI ranks.
     for key in (
         "PATH",
         "LD_LIBRARY_PATH",
         "AMBER_MLIPS_BACKEND",
         "AMBER_MLIPS_ML_KEYWORDS",
+        "AMBER_MLIPS_SERVER_SOCKET",
         "AMBER_MLIPS_DEBUG",
     ):
         prefix.extend(["-x", key])
@@ -244,11 +255,87 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
     return LaunchSpec(mode="mpi", prefix=tuple(prefix))
 
 
-def _build_child_env(base_env, shim_dir, backend, ml_keywords, debug=False):
+def _compute_server_socket(backend, ml_keywords):
+    """Deterministic socket path scoped to this process."""
+    key = "amber_mlips_{}_{}_{}_{}".format(backend, ml_keywords, os.getpid(), id(time))
+    h = hashlib.md5(key.encode()).hexdigest()[:12]
+    uid = os.getuid()
+    return os.path.join(
+        tempfile.gettempdir(),
+        "amber_mlips_server_{uid}_{hash}.sock".format(uid=uid, hash=h),
+    )
+
+
+def _start_model_server(stack, backend, ml_keywords, debug=False):
+    """Start persistent MLIP model server and return socket path."""
+    socket_path = _compute_server_socket(backend, ml_keywords)
+
+    # Build server launch command.
+    cmd = [
+        sys.executable, "-m", "amber_mlips_plugins.mlip_server_entry",
+        "--backend", str(backend),
+        "--ml-keywords", str(ml_keywords),
+        "--server-socket", socket_path,
+        "--server-parent-pid", str(os.getpid()),
+    ]
+    if debug:
+        cmd.append("--debug")
+
+    print(
+        "[amber-mlips] Starting model server: {}".format(backend),
+        file=sys.stderr, flush=True,
+    )
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=sys.stderr,
+        start_new_session=True,
+    )
+
+    # Register cleanup.
+    def _cleanup_server():
+        try:
+            send_shutdown(socket_path, timeout=5.0)
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        try:
+            os.unlink(socket_path)
+        except OSError:
+            pass
+
+    stack.callback(_cleanup_server)
+
+    # Wait for server to be ready.
+    startup_timeout = 300
+    waited = 0
+    while waited < startup_timeout:
+        if proc.poll() is not None:
+            raise AmberMLIPSError(
+                "Model server exited unexpectedly (code={}).".format(proc.returncode)
+            )
+        if server_is_alive(socket_path, timeout=1.0):
+            print("[amber-mlips] Model server ready.", file=sys.stderr, flush=True)
+            return socket_path
+        time.sleep(1)
+        waited += 1
+
+    raise AmberMLIPSError(
+        "Model server did not become ready within {}s.".format(startup_timeout)
+    )
+
+
+def _build_child_env(base_env, shim_dir, backend, ml_keywords, server_socket, debug=False):
     env = dict(base_env)
     env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
     env["AMBER_MLIPS_BACKEND"] = str(backend)
     env["AMBER_MLIPS_ML_KEYWORDS"] = str(ml_keywords)
+    env["AMBER_MLIPS_SERVER_SOCKET"] = str(server_socket)
     if debug:
         env["AMBER_MLIPS_DEBUG"] = "1"
     else:
@@ -369,11 +456,21 @@ def main(argv=None):
             _validate_mm_sander(ns.mm_ranks, sander_bin)
 
             shim_dir, qchem_path = _stage_qchem_shim(stack)
+
+            # Start persistent model server (loads model once).
+            server_socket = _start_model_server(
+                stack=stack,
+                backend=transformed.backend,
+                ml_keywords=transformed.ml_keywords,
+                debug=bool(ns.debug),
+            )
+
             child_env = _build_child_env(
                 base_env=base_env,
                 shim_dir=shim_dir,
                 backend=transformed.backend,
                 ml_keywords=transformed.ml_keywords,
+                server_socket=server_socket,
                 debug=bool(ns.debug),
             )
 

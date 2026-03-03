@@ -35,6 +35,7 @@ from .mlip_backends import (
     ev_to_ha,
     forces_ev_ang_to_gradient_ha_bohr,
 )
+from .mlip_server import ServerError, client_evaluate
 from .xtb_alpb_correction import XTBError
 from .xtb_embedcharge_correction import delta_embedcharge_minus_noembed
 
@@ -298,11 +299,41 @@ def _write_outputs(logfile, savfile, energy_ha, efield_mm_au, grad_qm_ha_bohr):
         handle.write("# amber-mlips qchem shim checkpoint marker\n")
 
 
-def run_qchem(inpfile, logfile, savfile, backend, ml_keywords, env_debug=False):
+def _evaluate_via_server(socket_path, symbols, coords_q, charge, spinmult):
+    """Evaluate using the persistent model server."""
+    energy_ev, forces_ev_ang, _ = client_evaluate(
+        socket_path=socket_path,
+        symbols=symbols,
+        coords_ang=coords_q,
+        charge=int(charge),
+        multiplicity=int(spinmult),
+        need_forces=True,
+        need_hessian=False,
+        hessian_mode="analytical",
+        hessian_step=1.0e-3,
+    )
+    return energy_ev, forces_ev_ang
+
+
+def _evaluate_direct(kw_args, symbols, coords_q, charge, spinmult):
+    """Evaluate by loading model in-process (fallback, slow)."""
+    evaluator = _create_evaluator(kw_args)
+    energy_ev, forces_ev_ang, _ = evaluator.evaluate(
+        symbols=symbols,
+        coords_ang=coords_q,
+        charge=int(charge),
+        multiplicity=int(spinmult),
+        need_forces=True,
+        need_hessian=False,
+        hessian_mode="analytical",
+        hessian_step=1.0e-3,
+    )
+    return energy_ev, forces_ev_ang
+
+
+def run_qchem(inpfile, logfile, savfile, backend, ml_keywords, env_debug=False, server_socket=None):
     kw_args = _parse_keywords(backend=backend, ml_keywords=ml_keywords)
     debug = bool(env_debug) or bool(getattr(kw_args, "debug", False))
-
-    evaluator = _create_evaluator(kw_args)
 
     (
         charge,
@@ -316,16 +347,22 @@ def run_qchem(inpfile, logfile, savfile, backend, ml_keywords, env_debug=False):
     nq = int(coords_q.shape[0])
     ncl = int(coords_m.shape[0])
 
-    energy_ev, forces_ev_ang, _ = evaluator.evaluate(
-        symbols=symbols,
-        coords_ang=coords_q,
-        charge=int(charge),
-        multiplicity=int(spinmult),
-        need_forces=True,
-        need_hessian=False,
-        hessian_mode="analytical",
-        hessian_step=1.0e-3,
-    )
+    if server_socket and os.path.exists(server_socket):
+        if debug:
+            print("[amber-mlips-qchem] Using model server: {}".format(server_socket), file=sys.stderr, flush=True)
+        energy_ev, forces_ev_ang = _evaluate_via_server(
+            socket_path=server_socket,
+            symbols=symbols, coords_q=coords_q,
+            charge=charge, spinmult=spinmult,
+        )
+    else:
+        if debug:
+            print("[amber-mlips-qchem] No server, loading model directly (slow).", file=sys.stderr, flush=True)
+        energy_ev, forces_ev_ang = _evaluate_direct(
+            kw_args=kw_args,
+            symbols=symbols, coords_q=coords_q,
+            charge=charge, spinmult=spinmult,
+        )
 
     forces_q = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
     forces_m = np.zeros((ncl, 3), dtype=np.float64)
@@ -420,6 +457,7 @@ def main(argv=None):
         return 2
 
     ml_keywords = os.environ.get("AMBER_MLIPS_ML_KEYWORDS", "")
+    server_socket = os.environ.get("AMBER_MLIPS_SERVER_SOCKET", "").strip() or None
     env_debug = str(os.environ.get("AMBER_MLIPS_DEBUG", "")).strip() in {
         "1",
         "true",
@@ -436,9 +474,10 @@ def main(argv=None):
             backend=backend,
             ml_keywords=ml_keywords,
             env_debug=env_debug,
+            server_socket=server_socket,
         )
         return 0
-    except (QCShimError, BackendError, OSError, ValueError) as exc:
+    except (QCShimError, BackendError, ServerError, OSError, ValueError) as exc:
         print("[amber-mlips-qchem] ERROR: {}".format(exc), file=sys.stderr)
         return 1
 
