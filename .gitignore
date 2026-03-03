@@ -12,7 +12,6 @@ dist/
 # Example output files
 examples/_output/
 examples/*.out
-examples/*.rst7
 examples/*.nc
 examples/*.info
 examples/*.log

@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Example: QM/MM MD of 1il4 ligand (50 steps) with various MLIP backends.
 
 # --- UMA ---
