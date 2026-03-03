@@ -139,7 +139,7 @@ _QMMM_RE = re.compile(
 _QC_RE = re.compile(r"(?ims)^[ \t]*&qc\b.*?^[ \t]*/[ \t]*\n?", re.MULTILINE)
 
 
-def _build_qmmm_block(order, values, key_style):
+def _build_qmmm_block(order, values, key_style, orig_qm_theory=None, orig_ml_keywords=None):
     lines = [" &qmmm"]
     for key in order:
         if key not in values:
@@ -147,16 +147,22 @@ def _build_qmmm_block(order, values, key_style):
         out_key = key_style.get(key, key)
         out_val = values[key]
         lines.append("  {}={},".format(out_key, out_val))
+        # After qm_theory='EXTERN', add commented-out original values.
+        if key == "qm_theory" and orig_qm_theory is not None:
+            lines.append("  ! qm_theory='{}',".format(orig_qm_theory))
+            if orig_ml_keywords:
+                lines.append("  ! ml_keywords='{}',".format(orig_ml_keywords))
     lines.append(" /")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)
 
 
-def _build_qc_block():
+def _build_qc_block(backend=""):
     # Trigger AMBER EXTERN through the non-MPI qchem interface.
     return (
+        "! Below is a dummy input for executing ML/MM\n"
         "&qc\n"
-        "  method='BLYP',\n"
-        "  basis='6-31G*',\n"
+        "  method='{}',\n".format(backend or "-") +
+        "  basis='-',\n"
         "  num_mpi_prcs=1,\n"
         "  num_threads=1,\n"
         "  ntpr=1,\n"
@@ -219,14 +225,16 @@ def transform_mdin_text(text):
     if "qmtheory" in order:
         order.remove("qmtheory")
 
-    new_qmmm = _build_qmmm_block(order, values, key_style)
+    new_qmmm = _build_qmmm_block(order, values, key_style,
+                                   orig_qm_theory=backend,
+                                   orig_ml_keywords=ml_keywords)
 
     rewritten = text[: match.start()] + new_qmmm + text[match.end() :]
     rewritten = _QC_RE.sub("", rewritten)
 
     if not rewritten.endswith("\n"):
         rewritten += "\n"
-    rewritten += "\n" + _build_qc_block()
+    rewritten += _build_qc_block(backend=backend)
 
     return TransformResult(
         backend=backend,
