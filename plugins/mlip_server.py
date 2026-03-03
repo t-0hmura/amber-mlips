@@ -95,13 +95,17 @@ def _recv_msg(sock):
 class MLIPServer(object):
     """Single-threaded Unix domain socket server wrapping an evaluator."""
 
-    def __init__(self, evaluator, socket_path, idle_timeout=600, parent_pid=None):
+    def __init__(self, evaluator, socket_path, idle_timeout=600, parent_pid=None,
+                 embedcharge_opts=None):
         self.evaluator = evaluator
         self.socket_path = os.path.abspath(socket_path)
         self.idle_timeout = float(idle_timeout)
         self.parent_pid = int(parent_pid) if parent_pid is not None else None
         self._running = False
         self._last_activity = time.time()
+        # embedcharge_opts: dict with keys xtb_cmd, xtb_acc, xtb_workdir,
+        # xtb_keep_files, ncores — or None if embedcharge is disabled.
+        self._embedcharge_opts = dict(embedcharge_opts) if embedcharge_opts else None
 
     def serve_forever(self):
         if os.path.exists(self.socket_path):
@@ -257,7 +261,44 @@ class MLIPServer(object):
                 hessian_step=hessian_step,
             )
 
-            return {
+            # Apply embedcharge correction if MM data is present and enabled.
+            mm_coords_raw = request.get("mm_coords_ang")
+            mm_charges_raw = request.get("mm_charges")
+            forces_mm_ev_ang = None
+
+            if (self._embedcharge_opts and mm_coords_raw is not None
+                    and mm_charges_raw is not None):
+                mm_coords = np.asarray(mm_coords_raw, dtype=np.float64).reshape(-1, 3)
+                mm_charges = np.asarray(mm_charges_raw, dtype=np.float64).reshape(-1)
+                ncl = int(mm_coords.shape[0])
+                if ncl > 0:
+                    from .xtb_embedcharge_correction import delta_embedcharge_minus_noembed
+                    opts = self._embedcharge_opts
+                    de, df_full, _ = delta_embedcharge_minus_noembed(
+                        symbols=symbols,
+                        coords_q_ang=coords_ang,
+                        mm_coords_ang=mm_coords,
+                        mm_charges=mm_charges,
+                        charge=charge,
+                        multiplicity=multiplicity,
+                        need_forces=need_forces,
+                        need_hessian=False,
+                        xtb_cmd=str(opts.get("xtb_cmd", "xtb")),
+                        xtb_acc=float(opts.get("xtb_acc", 0.2)),
+                        xtb_workdir=str(opts.get("xtb_workdir", "tmp")),
+                        xtb_keep_files=bool(opts.get("xtb_keep_files", False)),
+                        ncores=int(opts.get("ncores", 4)),
+                        hessian_step=hessian_step,
+                    )
+                    nq = int(coords_ang.reshape(-1, 3).shape[0])
+                    df_full = np.asarray(df_full, dtype=np.float64).reshape(nq + ncl, 3)
+                    energy_ev = float(energy_ev) + float(de)
+                    if forces_ev_ang is not None:
+                        forces_ev_ang = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
+                        forces_ev_ang = forces_ev_ang + df_full[:nq, :]
+                    forces_mm_ev_ang = df_full[nq:, :]
+
+            resp = {
                 "status": "ok",
                 "energy_ev": float(energy_ev),
                 "forces_ev_ang": forces_ev_ang.tolist()
@@ -267,6 +308,9 @@ class MLIPServer(object):
                 if hess_ev_ang2 is not None
                 else None,
             }
+            if forces_mm_ev_ang is not None:
+                resp["forces_mm_ev_ang"] = forces_mm_ev_ang.tolist()
+            return resp
         except Exception as exc:
             traceback.print_exc(file=sys.stderr)
             return {"status": "error", "message": str(exc)}

@@ -376,7 +376,6 @@ def _delta_embed_minus_vac(
     xtb_workdir,
     xtb_keep_files,
     ncores,
-    vacuum_cache=None,
 ):
     nm = int(np.asarray(mm_charges, dtype=np.float64).reshape(-1).size)
     if nm <= 0:
@@ -385,15 +384,6 @@ def _delta_embed_minus_vac(
         return 0.0, zq, zm
 
     mode = "grad" if need_forces else "sp"
-
-    # Check vacuum cache first.
-    vac_e = None
-    vac_fq = None
-    key = None
-    if need_forces and vacuum_cache is not None:
-        key = np.ascontiguousarray(np.asarray(coords_q_ang, dtype=np.float64)).tobytes()
-        if key in vacuum_cache:
-            vac_e, vac_fq = vacuum_cache[key]
 
     common_kw = dict(
         symbols=symbols,
@@ -408,36 +398,24 @@ def _delta_embed_minus_vac(
         ncores=ncores,
     )
 
-    if vac_e is not None:
-        # Vacuum cached — only run embed.
-        embed_e, embed_fq, embed_fm = _run_xtb_state(
+    # Run embed and vacuum in parallel (they are independent).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        fut_embed = pool.submit(
+            _run_xtb_state,
             with_embedding=True,
             mm_coords_ang=mm_coords_ang,
             mm_charges=mm_charges,
             **common_kw
         )
-    else:
-        # Run embed and vacuum in parallel (they are independent).
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            fut_embed = pool.submit(
-                _run_xtb_state,
-                with_embedding=True,
-                mm_coords_ang=mm_coords_ang,
-                mm_charges=mm_charges,
-                **common_kw
-            )
-            fut_vac = pool.submit(
-                _run_xtb_state,
-                with_embedding=False,
-                mm_coords_ang=np.zeros((0, 3), dtype=np.float64),
-                mm_charges=np.zeros((0,), dtype=np.float64),
-                **common_kw
-            )
-            embed_e, embed_fq, embed_fm = fut_embed.result()
-            vac_e, vac_fq, _ = fut_vac.result()
-
-        if need_forces and vacuum_cache is not None and key is not None:
-            vacuum_cache[key] = (float(vac_e), np.asarray(vac_fq, dtype=np.float64))
+        fut_vac = pool.submit(
+            _run_xtb_state,
+            with_embedding=False,
+            mm_coords_ang=np.zeros((0, 3), dtype=np.float64),
+            mm_charges=np.zeros((0,), dtype=np.float64),
+            **common_kw
+        )
+        embed_e, embed_fq, embed_fm = fut_embed.result()
+        vac_e, vac_fq, _ = fut_vac.result()
 
     de_ev = float(embed_e - vac_e)
     if not need_forces:
@@ -523,7 +501,7 @@ def delta_embedcharge_minus_noembed(
     xtb_acc=0.2,
     xtb_workdir="tmp",
     xtb_keep_files=False,
-    ncores=1,
+    ncores=4,
     hessian_step=1.0e-3,
 ):
     """Return xTB point-charge embedding correction in MLIP units.
@@ -568,7 +546,6 @@ def delta_embedcharge_minus_noembed(
         run_ncores = 1
 
     req_force = bool(need_forces) or bool(need_hessian)
-    vacuum_cache = {} if req_force else None
     de_ev, df_q, df_m = _delta_embed_minus_vac(
         symbols=q_symbols,
         coords_q_ang=q_coords,
@@ -582,7 +559,6 @@ def delta_embedcharge_minus_noembed(
         xtb_workdir=xtb_workdir,
         xtb_keep_files=xtb_keep_files,
         ncores=run_ncores,
-        vacuum_cache=vacuum_cache,
     )
 
     df_full = None
@@ -607,7 +583,6 @@ def delta_embedcharge_minus_noembed(
                 xtb_workdir=xtb_workdir,
                 xtb_keep_files=xtb_keep_files,
                 ncores=run_ncores,
-                vacuum_cache=vacuum_cache,
             )
             return _assemble_full_force(_fq, _fm)
 

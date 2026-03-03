@@ -181,18 +181,71 @@ def _safe_unlink(path):
         pass
 
 
-def _stage_qchem_shim(stack):
+def _find_c_shim():
+    """Return path to compiled C shim binary, building it if necessary.
+
+    On first invocation (or after architecture change), the C source is
+    compiled automatically so the binary matches the current platform.
+    Falls back to None (Python shim) if compilation fails.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    c_shim_dir = os.path.join(here, "c_shim")
+    binary = os.path.join(c_shim_dir, "qchem_shim")
+    source = os.path.join(c_shim_dir, "qchem_shim.c")
+
+    if os.path.isfile(binary) and os.access(binary, os.X_OK):
+        return binary
+
+    # Source must exist for auto-build.
+    if not os.path.isfile(source):
+        return None
+
+    # Auto-build: compile the C shim for this architecture.
+    cc = os.environ.get("CC", "cc")
+    cmd = [cc, "-O2", "-Wall", "-o", binary, source, "-lm"]
+    print(
+        "[amber-mlips] Building C shim: {}".format(" ".join(cmd)),
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        subprocess.check_call(cmd, cwd=c_shim_dir, timeout=60)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+        print(
+            "[amber-mlips] WARNING: C shim build failed ({}), "
+            "falling back to Python shim.".format(exc),
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+
+    if os.path.isfile(binary) and os.access(binary, os.X_OK):
+        print(
+            "[amber-mlips] C shim built successfully: {}".format(binary),
+            file=sys.stderr,
+            flush=True,
+        )
+        return binary
+    return None
+
+
+def _stage_qchem_shim(stack, use_c_shim=False):
     runtime_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="amber_mlips_qchem_"))
     qchem_path = os.path.join(runtime_dir, "qchem")
 
-    script = (
-        "#!/usr/bin/env bash\n"
-        "exec {} -m amber_mlips_plugins.nonmpi_qc_shim \"$@\"\n"
-    ).format(shlex.quote(sys.executable))
-
-    with open(qchem_path, "w") as handle:
-        handle.write(script)
-    os.chmod(qchem_path, 0o755)
+    c_shim = _find_c_shim() if use_c_shim else None
+    if c_shim:
+        # Symlink C binary as "qchem" for AMBER to invoke.
+        os.symlink(c_shim, qchem_path)
+    else:
+        # Fallback: bash wrapper → Python shim.
+        script = (
+            "#!/usr/bin/env bash\n"
+            "exec {} -m amber_mlips_plugins.nonmpi_qc_shim \"$@\"\n"
+        ).format(shlex.quote(sys.executable))
+        with open(qchem_path, "w") as handle:
+            handle.write(script)
+        os.chmod(qchem_path, 0o755)
 
     return runtime_dir, qchem_path
 
@@ -450,7 +503,8 @@ def main(argv=None):
                 from .sander_patch import ensure_patched_sander
                 sander_bin = ensure_patched_sander(sander_bin)
 
-            shim_dir, qchem_path = _stage_qchem_shim(stack)
+            # Use fast C shim (embedcharge correction is handled server-side).
+            shim_dir, qchem_path = _stage_qchem_shim(stack, use_c_shim=True)
 
             # Start persistent model server (loads model once).
             server_socket = _start_model_server(
