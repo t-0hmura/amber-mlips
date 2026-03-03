@@ -261,7 +261,7 @@ def _create_evaluator(args):
 
     if backend == "mace":
         return MACEEvaluator(
-            model=model or "small",
+            model=model or "MACE-OMOL-0",
             device=args.device,
             default_dtype=args.mace_default_dtype,
             calc_kwargs=None,

@@ -449,10 +449,17 @@ class UMAEvaluator(_BackendBase):
             from fairchem.core.datasets.atomic_data import AtomicData
         except Exception as exc:
             raise BackendError(
-                "UMA backend requires fairchem-core and torch. Install with: pip install 'g16-mlips[uma]'"
+                "UMA backend requires fairchem-core and torch. Install with: pip install 'amber-mlips[uma]'"
             ) from exc
 
         self._torch = torch
+        # PyTorch 2.6+ defaults weights_only=True in torch.load(); fairchem
+        # checkpoints use `slice` which isn't allowlisted yet.
+        try:
+            torch.serialization.add_safe_globals([slice])
+        except (AttributeError, TypeError):
+            pass
+
         if str(device).lower() == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
 

@@ -26,7 +26,7 @@
   qmcharge=0,
   spin=1,
   qm_theory='orb',
-  ml_keywords='--model orb-v3',
+  ml_keywords='--model orb-v3-conservative-omol',
   qmshake=0,
   qm_ewald=0,
   qm_pme=0,

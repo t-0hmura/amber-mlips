@@ -56,8 +56,8 @@ huggingface-cli login
 
 Other backends:
 ```text
-  qm_theory='orb',    ml_keywords='--model orb-v3',
-  qm_theory='mace',   ml_keywords='--model mace-mp-0-large',
+  qm_theory='orb',    ml_keywords='--model orb-v3-conservative-omol',
+  qm_theory='mace',   ml_keywords='--model MACE-OMOL-0',
   qm_theory='aimnet2', ml_keywords='--model aimnet2',
 ```
 
@@ -155,8 +155,8 @@ Individual input files:
 | File | Backend | Description |
 |------|---------|-------------|
 | `uma.in` | UMA | `uma-s-1p1` |
-| `orb.in` | ORB | `orb-v3` |
-| `mace.in` | MACE | `mace-mp-0-large` |
+| `orb.in` | ORB | `orb-v3-conservative-omol` |
+| `mace.in` | MACE | `MACE-OMOL-0` |
 | `aimnet2.in` | AIMNet2 | `aimnet2` |
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 

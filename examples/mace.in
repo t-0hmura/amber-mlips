@@ -26,7 +26,7 @@
   qmcharge=0,
   spin=1,
   qm_theory='mace',
-  ml_keywords='--model mace-mp-0-large',
+  ml_keywords='--model MACE-OMOL-0',
   qmshake=0,
   qm_ewald=0,
   qm_pme=0,

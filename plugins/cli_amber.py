@@ -215,7 +215,7 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
         return LaunchSpec(mode="direct", prefix=tuple())
 
     mpi_bin = _resolve_mpi_launcher(mpi_bin_opt)
-    prefix = [mpi_bin, "-np", str(ranks)]
+    prefix = [mpi_bin, "-np", str(ranks), "--map-by", ":OVERSUBSCRIBE"]
 
     # If /dev/shm is too small for shared-memory transport, fall back to
     # pipe-based communication.  OpenMPI 5.x needs ~16 MB per rank.

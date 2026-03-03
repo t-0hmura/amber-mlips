@@ -54,6 +54,15 @@ Final outputs:
 
 Requires `xtb` (or explicit `--xtb-cmd`).
 
+## Model Server
+
+The MLIP model is loaded once into a persistent server process (`plugins/mlip_server.py`) that communicates with the `qchem` shim via a Unix domain socket.
+
+- The server is started automatically when `amber-mlips` launches.
+- The `qchem` shim (called each MD step by `sander`) sends coordinates to the server and receives energy/forces back as JSON.
+- This avoids reloading the model on every MD step, reducing per-step overhead to ~ms.
+- The server shuts down automatically when the parent `amber-mlips` process exits.
+
 ## MM MPI Launch
 
 The ML evaluation path is always single-process (non-MPI). MM-side parallelism is independent:
