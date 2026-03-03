@@ -246,17 +246,6 @@ def build_patched_sander(source_root, build_root):
         link_cmd = link_cmd.replace(_OBJ_PATTERN, patched_obj)
         link_cmd = re.sub(r"-o\s+sander\.MPI", "-o " + _CACHED_BIN, link_cmd)
 
-        # Fix missing libopenblas.so symlink if needed
-        if "/usr/lib64/libopenblas.so" in link_cmd:
-            real_lib = "/usr/lib64/libopenblas.so"
-            if not os.path.exists(real_lib):
-                for candidate in ("/usr/lib64/libopenblas.so.0",):
-                    if os.path.exists(candidate):
-                        local_link = os.path.join(tmpdir, "libopenblas.so")
-                        os.symlink(candidate, local_link)
-                        link_cmd = link_cmd.replace(real_lib, local_link)
-                        break
-
         _run_cmd(link_cmd, "link", cwd=sander_build)
 
     _save_meta(source_root)

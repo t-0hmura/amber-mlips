@@ -82,21 +82,11 @@ def _resolve_sander_bin(user_choice, prefer_mpi=False):
     names = ("sander.MPI", "sander") if prefer_mpi else ("sander", "sander.MPI")
 
     amberhome = os.environ.get("AMBERHOME", "").strip()
-    candidates = []
     if amberhome:
         for name in names:
-            candidates.append(os.path.join(amberhome, "bin", name))
-
-    fixed = {
-        "sander": "/home/apps/amber24/bin/sander",
-        "sander.MPI": "/home/apps/amber24/bin/sander.MPI",
-    }
-    for name in names:
-        candidates.append(fixed[name])
-
-    for path in candidates:
-        if _is_executable(path):
-            return path
+            path = os.path.join(amberhome, "bin", name)
+            if _is_executable(path):
+                return path
 
     for name in names:
         found = shutil.which(name)

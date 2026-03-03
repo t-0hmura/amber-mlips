@@ -143,17 +143,22 @@ Model download notes:
 
 ## Examples
 
-Ready-to-run examples are in the [`examples/`](examples/) directory with an alanine dipeptide test system.
+Ready-to-run examples are in the [`examples/`](examples/) directory with a protein–ligand system (1IL4, 50 387 atoms, 17 QM atoms).
 
 ```bash
 cd examples
-./run.sh uma          # UMA
-./run.sh orb          # ORB
-./run.sh mace         # MACE
-./run.sh embedcharge  # UMA + embedcharge
-./run.sh minimize     # energy minimization
-./run.sh all          # all of the above
+./run.sh              # runs all 5 backends sequentially
 ```
+
+Individual input files:
+
+| File | Backend | Description |
+|------|---------|-------------|
+| `uma.in` | UMA | `uma-s-1p1` |
+| `orb.in` | ORB | `orb-v3` |
+| `mace.in` | MACE | `mace-mp-0-large` |
+| `aimnet2.in` | AIMNet2 | `aimnet2` |
+| `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 
 ## Upstream Model Sources
 
