@@ -22,11 +22,11 @@
   ifqnt=1,           ! Enable QM/MM
  /
  &qmmm
-  qmmask="@1257-1289,1457-1470,1912-1926,2668-2680,2740-2744,2786-2803,4199-4215", ! QM region atom mask
-  qmcharge=0,        ! Net charge of QM region
-  spin=1,            ! Spin multiplicity of QM region
-  qm_theory='aimnet2', ! QM method (amber-mlips backend)
+  qmmask="@1257-1289,1457-1470,1912-1926,2668-2680,2740-2744,2786-2803,4199-4215", ! ML region atom mask
+  qmcharge=0,        ! Net charge of ML region
+  spin=1,            ! Spin multiplicity of ML region
+  qm_theory='aimnet2', ! ML method (amber-mlips backend)
   ml_keywords='--model aimnet2', ! amber-mlips backend options
-  qmshake=0,         ! No SHAKE on QM region bonds
+  qmshake=0,         ! No SHAKE on ML region bonds
   qmcut=12.0,        ! QM/MM electrostatic cutoff (Angstroms)
  /
