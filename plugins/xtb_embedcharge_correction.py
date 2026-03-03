@@ -11,6 +11,7 @@ where Q are QM atoms passed to MLIP and M are external point charges.
 
 from __future__ import absolute_import, division, print_function
 
+import concurrent.futures
 import os
 import re
 import shlex
@@ -384,22 +385,8 @@ def _delta_embed_minus_vac(
         return 0.0, zq, zm
 
     mode = "grad" if need_forces else "sp"
-    embed_e, embed_fq, embed_fm = _run_xtb_state(
-        symbols=symbols,
-        coords_q_ang=coords_q_ang,
-        charge=charge,
-        multiplicity=multiplicity,
-        mode=mode,
-        with_embedding=True,
-        mm_coords_ang=mm_coords_ang,
-        mm_charges=mm_charges,
-        xtb_cmd=xtb_cmd,
-        xtb_acc=xtb_acc,
-        xtb_workdir=xtb_workdir,
-        xtb_keep_files=xtb_keep_files,
-        ncores=ncores,
-    )
 
+    # Check vacuum cache first.
     vac_e = None
     vac_fq = None
     key = None
@@ -408,22 +395,47 @@ def _delta_embed_minus_vac(
         if key in vacuum_cache:
             vac_e, vac_fq = vacuum_cache[key]
 
-    if vac_e is None:
-        vac_e, vac_fq, _ = _run_xtb_state(
-            symbols=symbols,
-            coords_q_ang=coords_q_ang,
-            charge=charge,
-            multiplicity=multiplicity,
-            mode=mode,
-            with_embedding=False,
-            mm_coords_ang=np.zeros((0, 3), dtype=np.float64),
-            mm_charges=np.zeros((0,), dtype=np.float64),
-            xtb_cmd=xtb_cmd,
-            xtb_acc=xtb_acc,
-            xtb_workdir=xtb_workdir,
-            xtb_keep_files=xtb_keep_files,
-            ncores=ncores,
+    common_kw = dict(
+        symbols=symbols,
+        coords_q_ang=coords_q_ang,
+        charge=charge,
+        multiplicity=multiplicity,
+        mode=mode,
+        xtb_cmd=xtb_cmd,
+        xtb_acc=xtb_acc,
+        xtb_workdir=xtb_workdir,
+        xtb_keep_files=xtb_keep_files,
+        ncores=ncores,
+    )
+
+    if vac_e is not None:
+        # Vacuum cached — only run embed.
+        embed_e, embed_fq, embed_fm = _run_xtb_state(
+            with_embedding=True,
+            mm_coords_ang=mm_coords_ang,
+            mm_charges=mm_charges,
+            **common_kw
         )
+    else:
+        # Run embed and vacuum in parallel (they are independent).
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            fut_embed = pool.submit(
+                _run_xtb_state,
+                with_embedding=True,
+                mm_coords_ang=mm_coords_ang,
+                mm_charges=mm_charges,
+                **common_kw
+            )
+            fut_vac = pool.submit(
+                _run_xtb_state,
+                with_embedding=False,
+                mm_coords_ang=np.zeros((0, 3), dtype=np.float64),
+                mm_charges=np.zeros((0,), dtype=np.float64),
+                **common_kw
+            )
+            embed_e, embed_fq, embed_fm = fut_embed.result()
+            vac_e, vac_fq, _ = fut_vac.result()
+
         if need_forces and vacuum_cache is not None and key is not None:
             vacuum_cache[key] = (float(vac_e), np.asarray(vac_fq, dtype=np.float64))
 

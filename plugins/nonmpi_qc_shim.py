@@ -202,7 +202,7 @@ def _build_keyword_parser():
     parser.add_argument("--xtb-acc", type=float, default=0.2, help="xTB --acc value for embedcharge correction.")
     parser.add_argument("--xtb-workdir", default="tmp", help="xTB scratch base dir for embedcharge correction.")
     parser.add_argument("--xtb-keep-files", action="store_true", help="Keep xTB scratch directories for debugging.")
-    parser.add_argument("--xtb-ncores", type=int, default=1, help="xTB OMP threads for embedcharge correction.")
+    parser.add_argument("--xtb-ncores", type=int, default=4, help="xTB OMP threads for embedcharge correction.")
 
     # UMA
     parser.add_argument("--uma-task", default="omol")
@@ -295,7 +295,7 @@ def _write_outputs(logfile, savfile, energy_ha, efield_mm_au, grad_qm_ha_bohr):
             handle.write("{:25.20f}{:25.20f}{:25.20f}\n".format(float(row[0]), float(row[1]), float(row[2])))
 
     # Keep a tiny save/checkpoint marker to mirror qchem signature.
-    with open(savfile, "a") as handle:
+    with open(savfile, "w") as handle:
         handle.write("# amber-mlips qchem shim checkpoint marker\n")
 
 

@@ -35,7 +35,7 @@ huggingface-cli login
 4. Prepare an AMBER input file. Only `qm_theory` and `ml_keywords` are plugin-specific; everything else is native AMBER `&qmmm`.
 ```text
  &cntrl
-  imin=0, irest=1, ntx=5,
+  imin=0, irest=0, ntx=1,
   nstlim=1000, dt=0.001,
   ntb=0, ntt=3, gamma_ln=5.0,
   ntpr=10, ntwx=10, ntwr=100,
@@ -49,8 +49,6 @@ huggingface-cli login
   ml_keywords='--model uma-s-1p1',
   qmcut=12.0,
   qmshake=0,
-  qm_ewald=0,
-  qm_pme=0,
  /
 ```
 
@@ -183,6 +181,7 @@ See [`OPTIONS.md`](OPTIONS.md) for all wrapper and backend-specific options.
 
 - All options: [`OPTIONS.md`](OPTIONS.md)
 - Internal architecture: [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md)
+- Detailed MD settings (AMBER24 manual): https://ambermd.org/doc12/Amber24.pdf
 
 ## Citation
 

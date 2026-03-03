@@ -201,31 +201,39 @@ class MLIPServer(object):
         self._running = False
 
     def _handle_connection(self, conn):
+        # Support persistent connections: loop reading requests until the
+        # client disconnects or a short inter-message timeout fires.
         conn.settimeout(600.0)
-        request = _recv_msg(conn)
-        if request is None:
-            return
+        while self._running:
+            try:
+                request = _recv_msg(conn)
+            except socket.timeout:
+                break
+            except Exception:
+                break
+            if request is None:
+                break  # Client disconnected
 
-        self._last_activity = time.time()
-        action = request.get("action", "")
+            self._last_activity = time.time()
+            action = request.get("action", "")
 
-        if action == "ping":
-            _send_msg(conn, {"status": "ok", "message": "pong"})
-            return
+            if action == "ping":
+                _send_msg(conn, {"status": "ok", "message": "pong"})
+            elif action == "shutdown":
+                _send_msg(conn, {"status": "ok", "message": "shutting down"})
+                self._running = False
+                return
+            elif action == "evaluate":
+                response = self._do_evaluate(request)
+                _send_msg(conn, response)
+            else:
+                _send_msg(
+                    conn, {"status": "error", "message": "Unknown action: {}".format(action)}
+                )
 
-        if action == "shutdown":
-            _send_msg(conn, {"status": "ok", "message": "shutting down"})
-            self._running = False
-            return
-
-        if action == "evaluate":
-            response = self._do_evaluate(request)
-            _send_msg(conn, response)
-            return
-
-        _send_msg(
-            conn, {"status": "error", "message": "Unknown action: {}".format(action)}
-        )
+            # Short timeout for next message within same connection.
+            # If no new request arrives within 2s, close and go back to accept.
+            conn.settimeout(2.0)
 
     def _do_evaluate(self, request):
         try:
@@ -355,6 +363,112 @@ def client_evaluate(
         else None
     )
     return energy_ev, forces_ev_ang, hess_ev_ang2
+
+
+class PersistentClient(object):
+    """Reusable client that keeps the socket open across evaluations.
+
+    Usage::
+
+        client = PersistentClient("/tmp/mlip_server.sock")
+        for step in range(n_steps):
+            energy, forces, hess = client.evaluate(...)
+        client.close()
+
+    Also works as a context manager::
+
+        with PersistentClient(socket_path) as client:
+            energy, forces, hess = client.evaluate(...)
+    """
+
+    def __init__(self, socket_path, timeout=600.0):
+        self.socket_path = os.path.abspath(socket_path)
+        self.timeout = float(timeout)
+        self._sock = None
+
+    def _ensure_connected(self):
+        if self._sock is not None:
+            return
+        if not os.path.exists(self.socket_path):
+            raise ServerError(
+                "Server socket not found: {}. Is the server running?".format(
+                    self.socket_path
+                )
+            )
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.settimeout(self.timeout)
+        self._sock.connect(self.socket_path)
+
+    def _reset(self):
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+
+    def evaluate(
+        self,
+        symbols,
+        coords_ang,
+        charge,
+        multiplicity,
+        need_forces,
+        need_hessian,
+        hessian_mode,
+        hessian_step,
+    ):
+        """Send an evaluate request over the persistent connection."""
+        self._ensure_connected()
+        request = {
+            "action": "evaluate",
+            "symbols": list(symbols),
+            "coords_ang": np.asarray(coords_ang, dtype=np.float64).tolist(),
+            "charge": int(charge),
+            "multiplicity": int(multiplicity),
+            "need_forces": bool(need_forces),
+            "need_hessian": bool(need_hessian),
+            "hessian_mode": str(hessian_mode),
+            "hessian_step": float(hessian_step),
+        }
+        try:
+            _send_msg(self._sock, request)
+            response = _recv_msg(self._sock)
+        except Exception:
+            self._reset()
+            raise
+
+        if response is None:
+            self._reset()
+            raise ServerError("No response from server")
+        if response.get("status") != "ok":
+            raise ServerError(
+                "Server error: {}".format(response.get("message", "unknown"))
+            )
+
+        energy_ev = float(response["energy_ev"])
+        forces_ev_ang = (
+            np.asarray(response["forces_ev_ang"], dtype=np.float64)
+            if response.get("forces_ev_ang") is not None
+            else None
+        )
+        hess_ev_ang2 = (
+            np.asarray(response["hessian_ev_ang2"], dtype=np.float64)
+            if response.get("hessian_ev_ang2") is not None
+            else None
+        )
+        return energy_ev, forces_ev_ang, hess_ev_ang2
+
+    def close(self):
+        """Close the persistent connection."""
+        self._reset()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 # ---------------------------------------------------------------------------
