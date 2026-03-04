@@ -9,7 +9,7 @@ Four model families are currently supported:
 - **AIMNet2** ([aimnetcentral](https://github.com/isayevlab/aimnetcentral)) — default model: `aimnet2`
 
 All backends provide energy and gradient for AMBER QM/MM molecular dynamics and optimization.
-An optional **point-charge embedding** correction (`xTB`) is available via `--embedcharge`.
+An optional **point-charge embedding** correction with xTB is available via `--embedcharge`.
 
 Requires **Python 3.9** or later and **AmberTools** (`sander`).
 AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `sander` / `sander.MPI` are [LGPL 2.1](https://biobb-amber.readthedocs.io/en/latest/sander.html).
@@ -161,7 +161,7 @@ Benchmark on a protein-ligand system ([1IL4](./examples/1il4.pdb), 50,387 atoms,
 | Per step | ~135 ms | ~579 ms |
 | Speed | ~321 ps/day | ~75 ps/day |
 
-Machine: AMD Ryzen 7950X3D / 4.20 GHz (32 threads) + RTX 5080 (VRAM 16 GB), RAM 128 GB.
+Environment: AMD Ryzen 7950X3D / 4.20 GHz (32 threads) + RTX 5080 (VRAM 16 GB), RAM 128 GB.
 `--mm-ranks 16` used for MM MPI parallelism.
 
 ## Upstream Model Sources
