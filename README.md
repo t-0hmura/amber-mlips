@@ -11,10 +11,8 @@ Four model families are currently supported:
 All backends provide energy and gradient for AMBER QM/MM molecular dynamics and optimization.
 An optional **point-charge embedding** correction (`xTB`) is available via `--embedcharge`.
 
-> `amber-mlips` wraps `sander` so that a single command handles everything — no external server or separate process needed.
-
 Requires **Python 3.9** or later and **AmberTools** (`sander`).
-AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `sander` / `sander.MPI` are licensed under [LGPL 2.1](https://biobb-amber.readthedocs.io/en/latest/sander.html), allowing commercial use. No paid AMBER license is required.
+AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `sander` / `sander.MPI` are [LGPL 2.1](https://biobb-amber.readthedocs.io/en/latest/sander.html).
 
 > If you use Gaussian 16, see also: https://github.com/t-0hmura/g16-mlips
 > If you use ORCA, see also: https://github.com/t-0hmura/orca-mlips
@@ -26,7 +24,7 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 conda install conda-forge::ambertools=*=mpi_mpich_*
 conda install conda-forge::xtb        # optional: only needed for --embedcharge
 ```
-The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, the default `conda install conda-forge::ambertools` (nompi) also works.
+> The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, the default `conda install conda-forge::ambertools` (nompi) also works.
 
 2. Install PyTorch suitable for your CUDA environment.
 ```bash
