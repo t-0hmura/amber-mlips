@@ -14,6 +14,7 @@ An optional **point-charge embedding** correction (`xTB`) is available via `--em
 > `amber-mlips` wraps `sander` so that a single command handles everything — no external server or separate process needed.
 
 Requires **Python 3.9** or later and **AmberTools** (`sander`).
+AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `sander` / `sander.MPI` are licensed under [LGPL 2.1](https://biobb-amber.readthedocs.io/en/latest/sander.html), allowing commercial use. No paid AMBER license is required.
 
 > If you use Gaussian 16, see also: https://github.com/t-0hmura/g16-mlips
 > If you use ORCA, see also: https://github.com/t-0hmura/orca-mlips
