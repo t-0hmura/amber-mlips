@@ -158,6 +158,22 @@ Individual input files:
 | `aimnet2.in` | AIMNet2 | `aimnet2` |
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 
+## Performance Reference
+
+Benchmark on a protein–ligand system (1IL4, 50,387 atoms, 115 ML-region atoms):
+
+| | UMA | UMA + embedcharge |
+|---|---|---|
+| Model | `uma-s-1p1` | `uma-s-1p1 --embedcharge` |
+| Total atoms | 50,387 | 50,387 |
+| ML region atoms | 115 | 115 |
+| dt | 0.0005 ps | 0.0005 ps |
+| Per step | ~135 ms | ~579 ms |
+| Speed | ~321 ps/day | ~75 ps/day |
+
+Machine: AMD Ryzen 7950X3D / 4.20 GHz (32 threads) + RTX 5080 (VRAM 16 GB), RAM 128 GB.
+`--mm-ranks 16` used for MM MPI parallelism.
+
 ## Upstream Model Sources
 
 - UMA / FAIR-Chem: https://github.com/facebookresearch/fairchem
