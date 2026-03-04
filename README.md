@@ -44,7 +44,7 @@ pip install "amber-mlips[uma]"
 huggingface-cli login
 ```
 
-5. Prepare an AMBER input file. Only `qm_theory` and `ml_keywords` are plugin-specific; everything else is native AMBER `&qmmm`.
+5. Prepare an AMBER input file. Only **`qm_theory`** and **`ml_keywords`** are plugin-specific; everything else is native AMBER `&qmmm`. For examples, see inputs in [examples/*.in](./examples/)
 ```text
  &cntrl
   imin=0, irest=0, ntx=1,
@@ -71,7 +71,7 @@ Other backends:
   qm_theory='aimnet2', ml_keywords='--model aimnet2',
 ```
 
-6. Run with standard `sander` flags.
+6. Run with **`amber-mlips`** and standard `sander`-like flags.
 ```bash
 amber-mlips -O \
   -i mlmm.in -o mlmm.out \
