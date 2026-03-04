@@ -16,12 +16,14 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 
 ## Quick Start (Default = UMA)
 
-0. (Optional) Install AmberTools if not already installed. [Building from source](https://ambermd.org/GetAmber.php) with `-DMPI=TRUE` is recommended for full functionality (`--mm-ranks > 1` and auto-patching).
+0. (Optional) Install AmberTools if not already installed. **AmberTools 25** or later is recommended.
 ```bash
-# Recommended: build from source with MPI support
-# Or, conda (serial only — --mm-ranks 1):
-conda install conda-forge::ambertools
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+conda install dacase::ambertools-dac=25
 ```
+The conda package includes `sander`, `sander.MPI` (OpenMPI), and requires Python 3.12.
+You can also [build from source](https://ambermd.org/GetAmber.php); add `-DMPI=TRUE` for `sander.MPI`.
 
 1. (Optional) Install xTB. Only needed for `--embedcharge`.
 ```bash
@@ -44,7 +46,7 @@ pip install "amber-mlips[uma]"
 huggingface-cli login
 ```
 
-5. Prepare an AMBER input file. Only **`qm_theory`** and **`ml_keywords`** are plugin-specific; everything else is native AMBER `&qmmm`. For examples, see inputs in [examples/*.in](./examples/)
+5. Prepare an AMBER input file. Only **`qm_theory`** and **`ml_keywords`** are plugin-specific; everything else is native AMBER `&qmmm`. For examples, see inputs in [examples/*.in](./examples/).
 ```text
  &cntrl
   imin=0, irest=0, ntx=1,
@@ -103,12 +105,10 @@ The ML evaluation path is always single-process. The MM side (`sander`) can use 
 amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7
 ```
 
-- `--mm-ranks 1` (default): runs `sander` directly. Works with both conda and source-built AmberTools.
-- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`. **Requires AmberTools built from source** with `-DMPI=TRUE`. The conda package does not include the source files needed for auto-patching.
+- `--mm-ranks 1` (default): runs `sander` directly.
+- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`. Requires AmberTools built with MPI support.
 
-> **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs.
-> When `--mm-ranks > 1` is used, amber-mlips automatically detects and patches this bug (requires AMBER source tree and Fortran compiler).
-> See [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md) for details.
+> **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs. Use **AmberTools 25** or later for `--mm-ranks > 1`.
 
 ## Installing Model Families
 
@@ -182,7 +182,7 @@ For internal architecture details, see [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
 ## Troubleshooting
 
 - **`amber-mlips` command not found** — Activate the conda/venv environment where the package is installed.
-- **`sander` not found** — Install AmberTools (`conda install conda-forge::ambertools`), or use `--sander-bin /path/to/sander`.
+- **`sander` not found** — Install AmberTools (`conda install dacase::ambertools-dac=25`), or use `--sander-bin /path/to/sander`.
 - **UMA model download fails (401/403)** — Run `huggingface-cli login`. Some models require access approval on Hugging Face.
 - **MPI errors with `--mm-ranks > 1`** — Ensure `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
 - **Works interactively but fails in batch jobs** — Use `--sander-bin` with an absolute path.
