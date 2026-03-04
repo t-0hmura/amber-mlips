@@ -14,9 +14,6 @@ An optional **point-charge embedding** correction with xTB is available via `--e
 Requires **Python 3.9** or later and **AmberTools** (`sander`).
 AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `sander` / `sander.MPI` are [LGPL 2.1](https://biobb-amber.readthedocs.io/en/latest/sander.html).
 
-> If you use Gaussian 16, see also: https://github.com/t-0hmura/g16-mlips
-> If you use ORCA, see also: https://github.com/t-0hmura/orca-mlips
-
 ## Quick Start (Default = UMA)
 
 0. (Optional) Install AmberTools with MPI support if not already installed.
