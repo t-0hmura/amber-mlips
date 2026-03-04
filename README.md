@@ -160,7 +160,7 @@ Individual input files:
 
 ## Performance Reference
 
-Benchmark on a protein–ligand system ([1IL4](./examples/1li4.pdb), 50,387 atoms, 115 ML-region atoms):
+Benchmark on a protein–ligand system ([1IL4](./examples/1il4.pdb), 50,387 atoms, 115 [ML-region](./examples/1il4_mlregion.pdb) atoms):
 
 | | UMA | UMA + embedcharge |
 |---|---|---|
