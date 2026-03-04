@@ -19,12 +19,18 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 
 ## Quick Start (Default = UMA)
 
-1. Install AmberTools (MPI variant) and xTB via conda.
+0. (Optional) Install AmberTools with MPI support if not already installed.
 ```bash
 conda install conda-forge::ambertools=*=mpi_mpich_*
-conda install conda-forge::xtb        # optional: only needed for --embedcharge
 ```
-> The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, the default `conda install conda-forge::ambertools` (nompi) also works.
+The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, `conda install conda-forge::ambertools` (nompi) also works.
+You can also [build from source](https://ambermd.org/GetAmber.php) with `-DMPI=TRUE`.
+
+1. (Optional) Install xTB. Only needed for `--embedcharge`.
+```bash
+conda install conda-forge::xtb
+```
+You can also [build from source](https://github.com/grimme-lab/xtb).
 
 2. Install PyTorch suitable for your CUDA environment.
 ```bash
