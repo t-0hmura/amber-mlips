@@ -16,12 +16,12 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 
 ## Quick Start (Default = UMA)
 
-0. (Optional) Install AmberTools with MPI support if not already installed.
+0. (Optional) Install AmberTools if not already installed. [Building from source](https://ambermd.org/GetAmber.php) with `-DMPI=TRUE` is recommended for full functionality (`--mm-ranks > 1` and auto-patching).
 ```bash
-conda install conda-forge::ambertools=*=mpi_mpich_*
+# Recommended: build from source with MPI support
+# Or, conda (serial only — --mm-ranks 1):
+conda install conda-forge::ambertools
 ```
-The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, `conda install conda-forge::ambertools` (nompi) also works.
-You can also [build from source](https://ambermd.org/GetAmber.php) with `-DMPI=TRUE`.
 
 1. (Optional) Install xTB. Only needed for `--embedcharge`.
 ```bash
@@ -103,11 +103,11 @@ The ML evaluation path is always single-process. The MM side (`sander`) can use 
 amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r mlmm.rst7
 ```
 
-- `--mm-ranks 1` (default): runs `sander` directly.
-- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI` (included in the MPI variant installed in Quick Start step 0).
+- `--mm-ranks 1` (default): runs `sander` directly. Works with both conda and source-built AmberTools.
+- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`. **Requires AmberTools built from source** with `-DMPI=TRUE`. The conda package does not include the source files needed for auto-patching.
 
 > **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs.
-> When `--mm-ranks > 1` is used, amber-mlips automatically detects and patches this bug (requires `AMBERHOME` and Fortran compiler).
+> When `--mm-ranks > 1` is used, amber-mlips automatically detects and patches this bug (requires AMBER source tree and Fortran compiler).
 > See [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md) for details.
 
 ## Installing Model Families
