@@ -107,7 +107,7 @@ amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r 
 ```
 
 - `--mm-ranks 1` (default): runs `sander` directly.
-- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI` (included in the MPI variant installed in Quick Start step 1).
+- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI` (included in the MPI variant installed in Quick Start step 0).
 
 > **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs.
 > When `--mm-ranks > 1` is used, amber-mlips automatically detects and patches this bug (requires `AMBERHOME` and Fortran compiler).
