@@ -3,7 +3,7 @@
 
 The server loads the MLIP model once and keeps it resident in memory,
 accepting evaluation requests over a Unix domain socket.  The client
-is a lightweight function called by the Gaussian/ORCA runner each time
+is a lightweight function called by the AMBER runner each time
 the external program is invoked, avoiding repeated model loading.
 
 Wire protocol

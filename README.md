@@ -13,26 +13,36 @@ An optional **point-charge embedding** correction (`xTB`) is available via `--em
 
 > `amber-mlips` wraps `sander` so that a single command handles everything — no external server or separate process needed.
 
-Requires **Python 3.9** or later and **AMBER** (`sander`).
+Requires **Python 3.9** or later and **AmberTools** (`sander`).
+
+> If you use Gaussian 16, see also: https://github.com/t-0hmura/g16-mlips
+> If you use ORCA, see also: https://github.com/t-0hmura/orca-mlips
 
 ## Quick Start (Default = UMA)
 
-1. Install PyTorch suitable for your CUDA environment.
+1. Install AmberTools (MPI variant) and xTB via conda.
+```bash
+conda install conda-forge::ambertools=*=mpi_mpich_*
+conda install conda-forge::xtb        # optional: only needed for --embedcharge
+```
+The MPI variant includes both `sander` and `sander.MPI`. If you only need serial execution, the default `conda install conda-forge::ambertools` (nompi) also works.
+
+2. Install PyTorch suitable for your CUDA environment.
 ```bash
 pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 ```
 
-2. Install the package with the UMA backend. For ORB/MACE/AIMNet2, replace `uma` accordingly.
+3. Install the package with the UMA backend. For ORB/MACE/AIMNet2, replace `uma` accordingly.
 ```bash
 pip install "amber-mlips[uma]"
 ```
 
-3. Log in to Hugging Face for UMA model access. (Not required for ORB/MACE/AIMNet2)
+4. Log in to Hugging Face for UMA model access. (Not required for ORB/MACE/AIMNet2)
 ```bash
 huggingface-cli login
 ```
 
-4. Prepare an AMBER input file. Only `qm_theory` and `ml_keywords` are plugin-specific; everything else is native AMBER `&qmmm`.
+5. Prepare an AMBER input file. Only `qm_theory` and `ml_keywords` are plugin-specific; everything else is native AMBER `&qmmm`.
 ```text
  &cntrl
   imin=0, irest=0, ntx=1,
@@ -59,7 +69,7 @@ Other backends:
   qm_theory='aimnet2', ml_keywords='--model aimnet2',
 ```
 
-5. Run with standard `sander` flags.
+6. Run with standard `sander` flags.
 ```bash
 amber-mlips -O \
   -i mlmm.in -o mlmm.out \
@@ -71,9 +81,9 @@ amber-mlips -O \
 
 `--embedcharge` adds an xTB-based correction for electrostatic embedding of MM point charges into the QM region.
 
-Install xTB:
+Install xTB (if not already installed in Quick Start step 1):
 ```bash
-conda install xtb
+conda install conda-forge::xtb
 ```
 
 Use `--embedcharge` in `ml_keywords`:
@@ -92,29 +102,11 @@ amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r 
 ```
 
 - `--mm-ranks 1` (default): runs `sander` directly.
-- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`.
+- `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI` (included in the MPI variant installed in Quick Start step 1).
 
-### AMBER EXTERN MPI Bug (Auto-Patched)
-
-AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` where non-rank-0
-MPI tasks return without initialising output arrays, corrupting forces in
-multi-rank EXTERN QM/MM runs. This is an **upstream AMBER bug** affecting all
-EXTERN backends, not specific to amber-mlips.
-
-When `--mm-ranks > 1` is used, amber-mlips **automatically** handles this:
-
-1. Checks the AMBER source for the bug.
-2. If found, builds a patched `sander.MPI` and caches it in `~/.amber-mlips/`.
-3. Uses the patched binary for subsequent runs (no rebuild needed).
-
-If a future AMBER version fixes the bug, the patch is skipped automatically.
-
-**Requirements for auto-patching:**
-- AMBER source directory accessible (set `AMBERHOME`; source is located via `${AMBERHOME}_src` or sibling directories)
-- Fortran compiler used to build AMBER available in `PATH`
-
-If auto-patching cannot locate the source, an error message explains alternatives
-(`--mm-ranks 1` or `--sander-bin /path/to/patched/sander.MPI`).
+> **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs.
+> When `--mm-ranks > 1` is used, amber-mlips automatically detects and patches this bug (requires `AMBERHOME` and Fortran compiler).
+> See [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md) for details.
 
 ## Installing Model Families
 
@@ -141,14 +133,7 @@ Model download notes:
 
 ## Examples
 
-Ready-to-run examples are in the [`examples/`](examples/) directory with a protein–ligand system (1IL4, 50 387 atoms, 17 QM atoms).
-
-```bash
-cd examples
-./run.sh              # runs all 5 backends sequentially
-```
-
-Individual input files:
+Ready-to-run examples are in the [`examples/`](examples/) directory with a protein-ligand system (1IL4, 50,387 atoms, 115 QM atoms).
 
 | File | Backend | Description |
 |------|---------|-------------|
@@ -158,9 +143,15 @@ Individual input files:
 | `aimnet2.in` | AIMNet2 | `aimnet2` |
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 
+Each backend requires its own environment (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend directly:
+```bash
+cd examples
+amber-mlips -O -i uma.in -o uma.out -p leap.parm7 -c md.rst7 -r uma.rst7
+```
+
 ## Performance Reference
 
-Benchmark on a protein–ligand system ([1IL4](./examples/1il4.pdb), 50,387 atoms, 115 [ML-region](./examples/1il4_mlregion.pdb) atoms):
+Benchmark on a protein-ligand system ([1IL4](./examples/1il4.pdb), 50,387 atoms, 115 [ML-region](./examples/1il4_mlregion.pdb) atoms):
 
 | | UMA | UMA + embedcharge |
 |---|---|---|
@@ -184,20 +175,19 @@ Machine: AMD Ryzen 7950X3D / 4.20 GHz (32 threads) + RTX 5080 (VRAM 16 GB), RAM 
 ## Advanced Options
 
 See [`OPTIONS.md`](OPTIONS.md) for all wrapper and backend-specific options.
+For internal architecture details, see [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
 
 ## Troubleshooting
 
 - **`amber-mlips` command not found** — Activate the conda/venv environment where the package is installed.
-- **`sander` not found** — Set `AMBERHOME` or use `--sander-bin /path/to/sander`.
+- **`sander` not found** — Install AmberTools (`conda install conda-forge::ambertools`), or use `--sander-bin /path/to/sander`.
 - **UMA model download fails (401/403)** — Run `huggingface-cli login`. Some models require access approval on Hugging Face.
-- **MPI errors with `--mm-ranks > 1`** — Ensure `sander.MPI` is built and `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
+- **MPI errors with `--mm-ranks > 1`** — Ensure `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
 - **Works interactively but fails in batch jobs** — Use `--sander-bin` with an absolute path.
 
-## More Docs
+## References
 
-- All options: [`OPTIONS.md`](OPTIONS.md)
-- Internal architecture: [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md)
-- Detailed MD settings (AMBER24 manual): https://ambermd.org/doc12/Amber24.pdf
+- AMBER24 manual (detailed MD settings): https://ambermd.org/doc12/Amber24.pdf
 
 ## Citation
 

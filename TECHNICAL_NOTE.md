@@ -72,10 +72,11 @@ The ML evaluation path is always single-process (non-MPI). MM-side parallelism i
 
 The wrapper exports key environment variables (`PATH`, `LD_LIBRARY_PATH`, `AMBER_MLIPS_*`) via `-x` flags so that MPI ranks inherit the correct runtime.
 
-## Builtin Test Models
+## Builtin Test Models (dummy potentials for testing)
 
-For integration testing without ML dependencies:
+Dummy evaluators for integration testing without ML dependencies or GPU.
+Used to verify sander communication (file I/O, socket, MPI) without loading a real model.
 
 - `builtin:zero` — returns zero energy and forces
-- `builtin:harmonic` — harmonic potential (default k = 1.0)
+- `builtin:harmonic` — harmonic potential E = ½kr² (default k = 0.05)
 - `builtin:harmonic:<k>` — harmonic potential with custom spring constant

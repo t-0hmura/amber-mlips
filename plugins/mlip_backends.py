@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Common MLIP backend utilities for ORCA/Gaussian external plugins.
+"""Common MLIP backend utilities for AMBER EXTERN QM/MM plugins.
 
 This module provides four backend classes:
 - UMAEvaluator
@@ -609,7 +609,7 @@ class OrbMolEvaluator(_BackendBase):
             from orb_models.forcefield import pretrained as orb_pretrained
         except Exception as exc:
             raise BackendError(
-                "OrbMol backend requires orb-models and torch. Install with: pip install 'g16-mlips[orb]'"
+                "OrbMol backend requires orb-models and torch. Install with: pip install 'amber-mlips[orb]'"
             ) from exc
 
         self._torch = torch
@@ -856,7 +856,7 @@ class MACEEvaluator(_BackendBase):
             import torch
         except Exception as exc:
             raise BackendError(
-                "MACE backend requires torch and mace-torch. Install with: pip install 'g16-mlips[mace]'"
+                "MACE backend requires torch and mace-torch. Install with: pip install 'amber-mlips[mace]'"
             ) from exc
 
         self._torch = torch
@@ -1036,7 +1036,7 @@ class AIMNet2Evaluator(_BackendBase):
         except Exception as exc:
             raise BackendError(
                 "AIMNet2 backend requires torch and `aimnet`. "
-                "Install with: pip install 'g16-mlips[aimnet2]'"
+                "Install with: pip install 'amber-mlips[aimnet2]'"
             ) from exc
 
         self._torch = torch
@@ -1084,7 +1084,7 @@ class AIMNet2Evaluator(_BackendBase):
             from aimnet.calculators import AIMNet2Calculator
         except Exception as exc:
             raise BackendError(
-                "AIMNet2 backend requires `aimnet`. Install with: pip install g16-mlips[aimnet2]"
+                "AIMNet2 backend requires `aimnet`. Install with: pip install amber-mlips[aimnet2]"
             ) from exc
 
         # Build a flat list of (args, kwargs) constructor attempts.

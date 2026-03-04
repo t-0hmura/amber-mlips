@@ -51,7 +51,7 @@ On launch, `amber-mlips` transforms the input:
 | `--embedcharge` | Enable xTB point-charge embedding correction |
 | `--xtb-cmd <path>` | xTB executable (default: `xtb`) |
 | `--xtb-acc <float>` | xTB accuracy parameter (default: `0.2`) |
-| `--xtb-ncores <int>` | CPU cores for xTB (default: `1`) |
+| `--xtb-ncores <int>` | CPU cores for xTB (default: `4`) |
 | `--xtb-workdir <tmp\|path>` | xTB scratch directory (default: `tmp`) |
 | `--xtb-keep-files` | Keep xTB temporary files for debugging |
 | `--debug` | Verbose shim logs |
