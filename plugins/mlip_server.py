@@ -57,6 +57,7 @@ def _pid_is_alive(pid):
 _HEADER_FMT = "!I"  # 4-byte big-endian unsigned int
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
 _MAX_MSG_SIZE = 256 * 1024 * 1024  # 256 MB safety cap
+_BIN_MAGIC = 0x01  # first payload byte for binary format
 
 
 def _recv_exact(sock, nbytes):
@@ -68,6 +69,10 @@ def _recv_exact(sock, nbytes):
         buf.extend(chunk)
     return bytes(buf)
 
+
+# ---------------------------------------------------------------------------
+# JSON wire helpers (legacy, used by C shim and small messages)
+# ---------------------------------------------------------------------------
 
 def _send_msg(sock, obj):
     data = json.dumps(obj).encode("utf-8")
@@ -89,6 +94,123 @@ def _recv_msg(sock):
 
 
 # ---------------------------------------------------------------------------
+# Binary wire helpers (fast path for large numeric arrays)
+#
+# Format:  [4-byte total length][\x01][4-byte json_len][json_meta][array data]
+#
+# json_meta contains "_bin" key mapping array names to [shape...] lists.
+# Array data follows in declaration order as contiguous float64 bytes.
+# Auto-detected by first payload byte: '{' → JSON, \x01 → binary.
+# ---------------------------------------------------------------------------
+
+def _send_msg_bin(sock, meta, arrays=None):
+    """Send a message using the binary wire format.
+
+    *meta* is a JSON-serializable dict (small metadata).
+    *arrays* is an OrderedDict/list-of-tuples of ``(name, ndarray_or_None)``.
+    """
+    if arrays is None:
+        arrays = []
+    bin_desc = {}
+    buf_parts = []
+    for name, arr in (arrays.items() if hasattr(arrays, "items") else arrays):
+        if arr is None:
+            continue
+        arr = np.ascontiguousarray(arr, dtype=np.float64)
+        bin_desc[name] = list(arr.shape)
+        buf_parts.append(arr.tobytes())
+
+    meta_copy = dict(meta)
+    if bin_desc:
+        meta_copy["_bin"] = bin_desc
+
+    meta_bytes = json.dumps(meta_copy).encode("utf-8")
+    array_bytes = b"".join(buf_parts)
+
+    # \x01 magic + json_len(4) + json + array data
+    payload = (
+        bytes([_BIN_MAGIC])
+        + struct.pack(_HEADER_FMT, len(meta_bytes))
+        + meta_bytes
+        + array_bytes
+    )
+    header = struct.pack(_HEADER_FMT, len(payload))
+    sock.sendall(header + payload)
+
+
+def _recv_msg_auto(sock):
+    """Receive a message, auto-detecting JSON or binary format.
+
+    Returns ``(obj_dict, format_flag)`` where *format_flag* is
+    ``'json'`` or ``'bin'``.  For binary messages, numpy arrays listed
+    in ``obj["_bin"]`` are restored as ``np.float64`` arrays in *obj*.
+    """
+    header = _recv_exact(sock, _HEADER_SIZE)
+    if header is None:
+        return None, "json"
+    (length,) = struct.unpack(_HEADER_FMT, header)
+    if length > _MAX_MSG_SIZE:
+        raise ServerError("Message too large: {} bytes".format(length))
+    data = _recv_exact(sock, length)
+    if data is None:
+        raise ServerError("Connection closed mid-message")
+
+    if len(data) == 0:
+        raise ServerError("Empty payload")
+
+    # Auto-detect format by first byte.
+    if data[0] == _BIN_MAGIC:
+        if len(data) < 5:
+            raise ServerError("Binary message too short")
+        (json_len,) = struct.unpack(_HEADER_FMT, data[1:5])
+        meta = json.loads(data[5:5 + json_len].decode("utf-8"))
+        offset = 5 + json_len
+        bin_desc = meta.pop("_bin", {})
+        for name, shape in bin_desc.items():
+            nbytes = int(np.prod(shape)) * 8  # float64 = 8 bytes
+            arr_data = data[offset:offset + nbytes]
+            meta[name] = np.frombuffer(arr_data, dtype=np.float64).reshape(shape)
+            offset += nbytes
+        return meta, "bin"
+    else:
+        obj = json.loads(data.decode("utf-8"))
+        return obj, "json"
+
+
+def _send_msg_auto(sock, obj, fmt="json"):
+    """Send response matching the client's format."""
+    if fmt == "bin":
+        # Separate numpy arrays from the dict.
+        meta = {}
+        arrays = []
+        for k, v in obj.items():
+            if isinstance(v, np.ndarray):
+                arrays.append((k, v))
+            elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], (list, float, int)):
+                # Heuristic: large nested lists that were numpy arrays.
+                try:
+                    arr = np.asarray(v, dtype=np.float64)
+                    if arr.size > 20:
+                        arrays.append((k, arr))
+                        continue
+                except (ValueError, TypeError):
+                    pass
+                meta[k] = v
+            else:
+                meta[k] = v
+        _send_msg_bin(sock, meta, arrays)
+    else:
+        # JSON path: convert numpy arrays to lists for json.dumps().
+        json_obj = {}
+        for k, v in obj.items():
+            if isinstance(v, np.ndarray):
+                json_obj[k] = v.tolist()
+            else:
+                json_obj[k] = v
+        _send_msg(sock, json_obj)
+
+
+# ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 
@@ -106,6 +228,22 @@ class MLIPServer(object):
         # embedcharge_opts: dict with keys xtb_cmd, xtb_acc, xtb_workdir,
         # xtb_keep_files, ncores — or None if embedcharge is disabled.
         self._embedcharge_opts = dict(embedcharge_opts) if embedcharge_opts else None
+
+        # Persistent xTB worker pool for embedcharge correction.
+        self._embedcharge_pool = None
+        if self._embedcharge_opts:
+            try:
+                from .xtb_embedcharge_correction import EmbedchargeWorkerPool
+            except ImportError:
+                from xtb_embedcharge_correction import EmbedchargeWorkerPool
+            opts = self._embedcharge_opts
+            self._embedcharge_pool = EmbedchargeWorkerPool(
+                xtb_cmd=str(opts.get("xtb_cmd", "xtb")),
+                xtb_acc=float(opts.get("xtb_acc", 0.2)),
+                xtb_workdir=str(opts.get("xtb_workdir", "tmp")),
+                xtb_keep_files=bool(opts.get("xtb_keep_files", False)),
+                ncores=int(opts.get("ncores", 4)),
+            )
 
     def serve_forever(self):
         if os.path.exists(self.socket_path):
@@ -183,6 +321,11 @@ class MLIPServer(object):
                     conn.close()
         finally:
             srv.close()
+            if self._embedcharge_pool is not None:
+                try:
+                    self._embedcharge_pool.shutdown()
+                except Exception:
+                    pass
             if os.path.exists(self.socket_path):
                 try:
                     os.unlink(self.socket_path)
@@ -210,7 +353,7 @@ class MLIPServer(object):
         conn.settimeout(600.0)
         while self._running:
             try:
-                request = _recv_msg(conn)
+                request, client_fmt = _recv_msg_auto(conn)
             except socket.timeout:
                 break
             except Exception:
@@ -222,17 +365,18 @@ class MLIPServer(object):
             action = request.get("action", "")
 
             if action == "ping":
-                _send_msg(conn, {"status": "ok", "message": "pong"})
+                _send_msg_auto(conn, {"status": "ok", "message": "pong"}, client_fmt)
             elif action == "shutdown":
-                _send_msg(conn, {"status": "ok", "message": "shutting down"})
+                _send_msg_auto(conn, {"status": "ok", "message": "shutting down"}, client_fmt)
                 self._running = False
                 return
             elif action == "evaluate":
                 response = self._do_evaluate(request)
-                _send_msg(conn, response)
+                _send_msg_auto(conn, response, client_fmt)
             else:
-                _send_msg(
-                    conn, {"status": "error", "message": "Unknown action: {}".format(action)}
+                _send_msg_auto(
+                    conn, {"status": "error", "message": "Unknown action: {}".format(action)},
+                    client_fmt,
                 )
 
             # Short timeout for next message within same connection.
@@ -272,44 +416,70 @@ class MLIPServer(object):
                 mm_charges = np.asarray(mm_charges_raw, dtype=np.float64).reshape(-1)
                 ncl = int(mm_coords.shape[0])
                 if ncl > 0:
-                    from .xtb_embedcharge_correction import delta_embedcharge_minus_noembed
                     opts = self._embedcharge_opts
-                    de, df_full, _ = delta_embedcharge_minus_noembed(
-                        symbols=symbols,
-                        coords_q_ang=coords_ang,
-                        mm_coords_ang=mm_coords,
-                        mm_charges=mm_charges,
-                        charge=charge,
-                        multiplicity=multiplicity,
-                        need_forces=need_forces,
-                        need_hessian=False,
-                        xtb_cmd=str(opts.get("xtb_cmd", "xtb")),
-                        xtb_acc=float(opts.get("xtb_acc", 0.2)),
-                        xtb_workdir=str(opts.get("xtb_workdir", "tmp")),
-                        xtb_keep_files=bool(opts.get("xtb_keep_files", False)),
-                        ncores=int(opts.get("ncores", 4)),
-                        hessian_step=hessian_step,
-                    )
                     nq = int(coords_ang.reshape(-1, 3).shape[0])
-                    df_full = np.asarray(df_full, dtype=np.float64).reshape(nq + ncl, 3)
+
+                    if self._embedcharge_pool is not None:
+                        # Use persistent worker pool (fast path).
+                        from .xtb_embedcharge_correction import _assemble_full_force
+                        de, df_q, df_m = self._embedcharge_pool.delta_embed_minus_vac(
+                            symbols=symbols,
+                            coords_q_ang=coords_ang,
+                            mm_coords_ang=mm_coords,
+                            mm_charges=mm_charges,
+                            charge=charge,
+                            multiplicity=multiplicity,
+                            need_forces=need_forces,
+                            ncores=int(opts.get("ncores", 4)),
+                        )
+                        if need_forces and df_q is not None:
+                            df_full = _assemble_full_force(df_q, df_m)
+                        else:
+                            df_full = None
+                    else:
+                        # Fallback to non-persistent path.
+                        from .xtb_embedcharge_correction import delta_embedcharge_minus_noembed
+                        de, df_full, _ = delta_embedcharge_minus_noembed(
+                            symbols=symbols,
+                            coords_q_ang=coords_ang,
+                            mm_coords_ang=mm_coords,
+                            mm_charges=mm_charges,
+                            charge=charge,
+                            multiplicity=multiplicity,
+                            need_forces=need_forces,
+                            need_hessian=False,
+                            xtb_cmd=str(opts.get("xtb_cmd", "xtb")),
+                            xtb_acc=float(opts.get("xtb_acc", 0.2)),
+                            xtb_workdir=str(opts.get("xtb_workdir", "tmp")),
+                            xtb_keep_files=bool(opts.get("xtb_keep_files", False)),
+                            ncores=int(opts.get("ncores", 4)),
+                            hessian_step=hessian_step,
+                        )
+
                     energy_ev = float(energy_ev) + float(de)
-                    if forces_ev_ang is not None:
-                        forces_ev_ang = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
-                        forces_ev_ang = forces_ev_ang + df_full[:nq, :]
-                    forces_mm_ev_ang = df_full[nq:, :]
+                    if df_full is not None:
+                        df_full = np.asarray(df_full, dtype=np.float64).reshape(nq + ncl, 3)
+                        if forces_ev_ang is not None:
+                            forces_ev_ang = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
+                            forces_ev_ang = forces_ev_ang + df_full[:nq, :]
+                        forces_mm_ev_ang = df_full[nq:, :]
 
             resp = {
                 "status": "ok",
                 "energy_ev": float(energy_ev),
-                "forces_ev_ang": forces_ev_ang.tolist()
-                if forces_ev_ang is not None
-                else None,
-                "hessian_ev_ang2": hess_ev_ang2.tolist()
-                if hess_ev_ang2 is not None
-                else None,
             }
+            # Keep arrays as numpy when possible; _send_msg_auto will handle
+            # serialization (binary keeps ndarray, JSON falls back to .tolist()).
+            if forces_ev_ang is not None:
+                resp["forces_ev_ang"] = np.asarray(forces_ev_ang, dtype=np.float64)
+            else:
+                resp["forces_ev_ang"] = None
+            if hess_ev_ang2 is not None:
+                resp["hessian_ev_ang2"] = np.asarray(hess_ev_ang2, dtype=np.float64)
+            else:
+                resp["hessian_ev_ang2"] = None
             if forces_mm_ev_ang is not None:
-                resp["forces_mm_ev_ang"] = forces_mm_ev_ang.tolist()
+                resp["forces_mm_ev_ang"] = np.asarray(forces_mm_ev_ang, dtype=np.float64)
             return resp
         except Exception as exc:
             traceback.print_exc(file=sys.stderr)
@@ -359,6 +529,8 @@ def client_evaluate(
     hessian_mode,
     hessian_step,
     timeout=600.0,
+    mm_coords_ang=None,
+    mm_charges=None,
 ):
     """Connect to a running MLIPServer and request an evaluation.
 
@@ -374,10 +546,9 @@ def client_evaluate(
     sock.settimeout(timeout)
     try:
         sock.connect(socket_path)
-        request = {
+        meta = {
             "action": "evaluate",
             "symbols": list(symbols),
-            "coords_ang": np.asarray(coords_ang, dtype=np.float64).tolist(),
             "charge": int(charge),
             "multiplicity": int(multiplicity),
             "need_forces": bool(need_forces),
@@ -385,8 +556,15 @@ def client_evaluate(
             "hessian_mode": str(hessian_mode),
             "hessian_step": float(hessian_step),
         }
-        _send_msg(sock, request)
-        response = _recv_msg(sock)
+        arrays = [
+            ("coords_ang", np.asarray(coords_ang, dtype=np.float64)),
+        ]
+        if mm_coords_ang is not None:
+            arrays.append(("mm_coords_ang", np.asarray(mm_coords_ang, dtype=np.float64)))
+        if mm_charges is not None:
+            arrays.append(("mm_charges", np.asarray(mm_charges, dtype=np.float64)))
+        _send_msg_bin(sock, meta, arrays)
+        response, _ = _recv_msg_auto(sock)
     finally:
         sock.close()
 
@@ -396,9 +574,10 @@ def client_evaluate(
         raise ServerError("Server error: {}".format(response.get("message", "unknown")))
 
     energy_ev = float(response["energy_ev"])
+    fv = response.get("forces_ev_ang")
     forces_ev_ang = (
-        np.asarray(response["forces_ev_ang"], dtype=np.float64)
-        if response.get("forces_ev_ang") is not None
+        np.asarray(fv, dtype=np.float64)
+        if fv is not None
         else None
     )
     hess_ev_ang2 = (
@@ -461,13 +640,14 @@ class PersistentClient(object):
         need_hessian,
         hessian_mode,
         hessian_step,
+        mm_coords_ang=None,
+        mm_charges=None,
     ):
         """Send an evaluate request over the persistent connection."""
         self._ensure_connected()
-        request = {
+        meta = {
             "action": "evaluate",
             "symbols": list(symbols),
-            "coords_ang": np.asarray(coords_ang, dtype=np.float64).tolist(),
             "charge": int(charge),
             "multiplicity": int(multiplicity),
             "need_forces": bool(need_forces),
@@ -475,9 +655,16 @@ class PersistentClient(object):
             "hessian_mode": str(hessian_mode),
             "hessian_step": float(hessian_step),
         }
+        arrays = [
+            ("coords_ang", np.asarray(coords_ang, dtype=np.float64)),
+        ]
+        if mm_coords_ang is not None:
+            arrays.append(("mm_coords_ang", np.asarray(mm_coords_ang, dtype=np.float64)))
+        if mm_charges is not None:
+            arrays.append(("mm_charges", np.asarray(mm_charges, dtype=np.float64)))
         try:
-            _send_msg(self._sock, request)
-            response = _recv_msg(self._sock)
+            _send_msg_bin(self._sock, meta, arrays)
+            response, _ = _recv_msg_auto(self._sock)
         except Exception:
             self._reset()
             raise
@@ -491,14 +678,16 @@ class PersistentClient(object):
             )
 
         energy_ev = float(response["energy_ev"])
+        fv = response.get("forces_ev_ang")
         forces_ev_ang = (
-            np.asarray(response["forces_ev_ang"], dtype=np.float64)
-            if response.get("forces_ev_ang") is not None
+            np.asarray(fv, dtype=np.float64)
+            if fv is not None
             else None
         )
+        hv = response.get("hessian_ev_ang2")
         hess_ev_ang2 = (
-            np.asarray(response["hessian_ev_ang2"], dtype=np.float64)
-            if response.get("hessian_ev_ang2") is not None
+            np.asarray(hv, dtype=np.float64)
+            if hv is not None
             else None
         )
         return energy_ev, forces_ev_ang, hess_ev_ang2

@@ -127,6 +127,7 @@ def _build_xtb_cmd(
     multiplicity,
     xtb_acc,
     mode,
+    use_restart=False,
 ):
     cmd = _xtb_cmd_tokens(xtb_cmd)
     cmd.extend(
@@ -134,9 +135,10 @@ def _build_xtb_cmd(
             str(xyz_filename),
             "--acc",
             str(float(xtb_acc)),
-            "--norestart",
         ]
     )
+    if not use_restart:
+        cmd.append("--norestart")
     m = str(mode).strip().lower()
     if m == "grad":
         cmd.append("--grad")
@@ -291,6 +293,273 @@ def _parse_pcgrad(path, ncharges):
         )
 
     return np.asarray(rows, dtype=np.float64).reshape(int(ncharges), 3)
+
+
+# ---------------------------------------------------------------------------
+# Persistent xTB worker (inspired by tblite Calculator pattern)
+# ---------------------------------------------------------------------------
+
+
+class XTBWorker(object):
+    """Persistent xTB CLI worker that reuses a working directory and restart files.
+
+    Mirrors tblite's Calculator pattern: init once, update inputs, evaluate.
+    The xTB restart file from the previous step is used as the SCF initial
+    guess, significantly reducing iteration count for MD trajectories.
+    """
+
+    def __init__(self, role, xtb_cmd, xtb_acc, ncores,
+                 xtb_workdir="tmp", xtb_keep_files=False):
+        self._role = str(role)
+        self._xtb_cmd = str(xtb_cmd or "xtb")
+        self._xtb_acc = float(xtb_acc)
+        self._ncores = ncores
+        self._xtb_workdir = xtb_workdir
+        self._xtb_keep_files = bool(xtb_keep_files)
+
+        self._run_dir = None
+        self._xyz_path = None
+        self._pcharge_path = None
+        self._env = None
+        self._initialized = False
+        self._step_count = 0
+        self._last_charge = None
+        self._last_multiplicity = None
+        self._last_mode = None
+        self._cmd_cache = None
+
+    def _ensure_initialized(self):
+        if self._initialized:
+            return
+        base_dir = str(self._xtb_workdir or "tmp").strip()
+        if base_dir.lower() == "tmp":
+            base_dir = tempfile.gettempdir()
+        else:
+            base_dir = os.path.abspath(base_dir)
+        os.makedirs(base_dir, exist_ok=True)
+
+        self._run_dir = os.path.join(base_dir, "xtb-persistent-{}".format(self._role))
+        os.makedirs(self._run_dir, exist_ok=True)
+
+        self._xyz_path = os.path.join(self._run_dir, "xtb_input.xyz")
+        self._pcharge_path = os.path.join(self._run_dir, "pcharge")
+
+        self._env = os.environ.copy()
+        self._env["OMP_NUM_THREADS"] = str(resolve_xtb_ncores(self._ncores))
+
+        self._initialized = True
+
+    def _get_cmd(self, charge, multiplicity, mode):
+        """Return cached command list, rebuilding only when parameters change."""
+        if (self._cmd_cache is not None
+                and charge == self._last_charge
+                and multiplicity == self._last_multiplicity
+                and mode == self._last_mode):
+            return self._cmd_cache
+
+        # Parameters changed — rebuild command and invalidate restart file.
+        if (self._last_charge is not None
+                and (charge != self._last_charge
+                     or multiplicity != self._last_multiplicity)):
+            self.reset()
+
+        self._cmd_cache = _build_xtb_cmd(
+            xtb_cmd=self._xtb_cmd,
+            xyz_filename="xtb_input.xyz",
+            charge=charge,
+            multiplicity=multiplicity,
+            xtb_acc=self._xtb_acc,
+            mode=mode,
+            use_restart=True,
+        )
+        self._last_charge = charge
+        self._last_multiplicity = multiplicity
+        self._last_mode = mode
+        return self._cmd_cache
+
+    def _run_subprocess(self, cmd):
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=self._run_dir,
+                env=self._env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise XTBError(
+                "xTB command not found: '{}'. Set --xtb-cmd correctly.".format(
+                    self._xtb_cmd)
+            ) from exc
+        except Exception as exc:
+            raise XTBError(
+                "Failed to run xTB command '{}': {}".format(" ".join(cmd), exc))
+
+        if proc.returncode != 0:
+            out_tail = "\n".join((proc.stdout or "").splitlines()[-20:])
+            err_tail = "\n".join((proc.stderr or "").splitlines()[-20:])
+            raise XTBError(
+                "xTB failed (worker={}, rc={}).\nCMD: {}\nSTDOUT:\n{}\nSTDERR:\n{}".format(
+                    self._role, proc.returncode, " ".join(cmd), out_tail, err_tail,
+                )
+            )
+        return proc.stdout or ""
+
+    def evaluate(self, symbols, coords_q_ang, mode, with_embedding,
+                 mm_coords_ang, mm_charges, charge, multiplicity):
+        """Write inputs, run xTB, parse outputs.  Returns (energy_ev, fq, fm)."""
+        self._ensure_initialized()
+
+        nm = int(np.asarray(mm_charges, dtype=np.float64).reshape(-1).size)
+        cmd = self._get_cmd(charge, multiplicity, mode)
+
+        # Overwrite input files in persistent directory.
+        _write_xyz(self._xyz_path, symbols, coords_q_ang)
+        if with_embedding and nm > 0:
+            _write_pcharge(self._pcharge_path, mm_coords_ang, mm_charges)
+        else:
+            # Remove stale pcharge file so xTB does not pick it up.
+            if os.path.isfile(self._pcharge_path):
+                os.remove(self._pcharge_path)
+
+        # Run xTB; retry once with restart reset on failure.
+        try:
+            stdout = self._run_subprocess(cmd)
+        except XTBError:
+            if self._step_count > 0:
+                self.reset()
+                stdout = self._run_subprocess(cmd)
+            else:
+                raise
+
+        # Parse output.
+        m = str(mode).strip().lower()
+        if m == "sp":
+            energy_ha = _parse_energy_from_stdout(stdout)
+            if energy_ha is None:
+                raise XTBError("Could not parse xTB energy from stdout.")
+            energy_ev, _, _ = convert_units_xtb_to_mlip(energy_ha=energy_ha)
+            self._step_count += 1
+            return float(energy_ev), None, None
+
+        xyz_stem = os.path.splitext("xtb_input.xyz")[0]
+        engrad_path = os.path.join(self._run_dir, "{}.engrad".format(xyz_stem))
+        if not os.path.isfile(engrad_path):
+            raise XTBError("xTB engrad file not found: {}".format(engrad_path))
+
+        energy_ha, grad_q_ha_bohr = _parse_engrad(engrad_path, len(symbols))
+        energy_ev, forces_q_ev_ang, _ = convert_units_xtb_to_mlip(
+            energy_ha=energy_ha, gradient_ha_bohr=grad_q_ha_bohr,
+        )
+
+        forces_m_ev_ang = np.zeros((nm, 3), dtype=np.float64)
+        if with_embedding and nm > 0:
+            pcgrad_ha_bohr = _parse_pcgrad(
+                os.path.join(self._run_dir, "pcgrad"), nm)
+            _, forces_m_ev_ang, _ = convert_units_xtb_to_mlip(
+                gradient_ha_bohr=pcgrad_ha_bohr)
+
+        self._step_count += 1
+        return (
+            float(energy_ev),
+            np.asarray(forces_q_ev_ang, dtype=np.float64).reshape(len(symbols), 3),
+            np.asarray(forces_m_ev_ang, dtype=np.float64).reshape(nm, 3),
+        )
+
+    def reset(self):
+        """Delete restart file to force fresh SCF on next evaluate()."""
+        if self._run_dir is None:
+            return
+        restart = os.path.join(self._run_dir, "xtbrestart")
+        if os.path.isfile(restart):
+            try:
+                os.remove(restart)
+            except OSError:
+                pass
+
+    def shutdown(self):
+        """Clean up the persistent working directory."""
+        if self._run_dir is not None and not self._xtb_keep_files:
+            try:
+                shutil.rmtree(self._run_dir)
+            except Exception:
+                pass
+        self._run_dir = None
+        self._initialized = False
+
+
+class EmbedchargeWorkerPool(object):
+    """Manages persistent embed + vacuum xTB workers with a shared thread pool.
+
+    Created once at server startup, reused for the entire simulation.
+    """
+
+    def __init__(self, xtb_cmd="xtb", xtb_acc=0.2, xtb_workdir="tmp",
+                 xtb_keep_files=False, ncores=4):
+        self._embed_worker = XTBWorker(
+            role="embed", xtb_cmd=xtb_cmd, xtb_acc=xtb_acc,
+            ncores=ncores, xtb_workdir=xtb_workdir,
+            xtb_keep_files=xtb_keep_files,
+        )
+        self._vacuum_worker = XTBWorker(
+            role="vacuum", xtb_cmd=xtb_cmd, xtb_acc=xtb_acc,
+            ncores=ncores, xtb_workdir=xtb_workdir,
+            xtb_keep_files=xtb_keep_files,
+        )
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+    def delta_embed_minus_vac(self, symbols, coords_q_ang, mm_coords_ang,
+                              mm_charges, charge, multiplicity, need_forces,
+                              ncores):
+        """Compute dE = E(embed) - E(vacuum) using persistent workers."""
+        nm = int(np.asarray(mm_charges, dtype=np.float64).reshape(-1).size)
+        if nm <= 0:
+            zq = np.zeros((len(symbols), 3), dtype=np.float64) if need_forces else None
+            zm = np.zeros((0, 3), dtype=np.float64) if need_forces else None
+            return 0.0, zq, zm
+
+        mode = "grad" if need_forces else "sp"
+
+        fut_embed = self._executor.submit(
+            self._embed_worker.evaluate,
+            symbols=symbols, coords_q_ang=coords_q_ang, mode=mode,
+            with_embedding=True, mm_coords_ang=mm_coords_ang,
+            mm_charges=mm_charges, charge=charge, multiplicity=multiplicity,
+        )
+        fut_vac = self._executor.submit(
+            self._vacuum_worker.evaluate,
+            symbols=symbols, coords_q_ang=coords_q_ang, mode=mode,
+            with_embedding=False,
+            mm_coords_ang=np.zeros((0, 3), dtype=np.float64),
+            mm_charges=np.zeros((0,), dtype=np.float64),
+            charge=charge, multiplicity=multiplicity,
+        )
+
+        embed_e, embed_fq, embed_fm = fut_embed.result()
+        vac_e, vac_fq, _ = fut_vac.result()
+
+        de_ev = float(embed_e - vac_e)
+        if not need_forces:
+            return de_ev, None, None
+
+        df_q = np.asarray(embed_fq, dtype=np.float64).reshape(len(symbols), 3) - \
+            np.asarray(vac_fq, dtype=np.float64).reshape(len(symbols), 3)
+        df_m = np.asarray(embed_fm, dtype=np.float64).reshape(nm, 3)
+        return de_ev, df_q, df_m
+
+    def shutdown(self):
+        """Shut down workers and thread pool."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+        for worker in (self._embed_worker, self._vacuum_worker):
+            if worker is not None:
+                try:
+                    worker.shutdown()
+                except Exception:
+                    pass
 
 
 def _run_xtb_state(

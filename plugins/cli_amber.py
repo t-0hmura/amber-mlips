@@ -194,7 +194,15 @@ def _find_c_shim():
     source = os.path.join(c_shim_dir, "qchem_shim.c")
 
     if os.path.isfile(binary) and os.access(binary, os.X_OK):
-        return binary
+        # Rebuild if source is newer than binary.
+        if os.path.isfile(source):
+            try:
+                if os.path.getmtime(source) <= os.path.getmtime(binary):
+                    return binary
+            except OSError:
+                return binary
+        else:
+            return binary
 
     # Source must exist for auto-build.
     if not os.path.isfile(source):
