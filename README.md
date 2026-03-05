@@ -204,6 +204,6 @@ If you use this package, please cite:
   version      = {1.0.0},
   url          = {https://github.com/t-0hmura/amber-mlips},
   license      = {MIT},
-  doi          = {10.5281/zenodo.18871122}
+  doi          = {10.5281/zenodo.18871123}
 }
 ```
