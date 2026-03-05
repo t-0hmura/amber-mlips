@@ -1,4 +1,5 @@
 # amber-mlips
+[![DOI](https://zenodo.org/badge/1170512432.svg)](https://doi.org/10.5281/zenodo.18871122)
 
 MLIP (Machine Learning Interatomic Potential) wrapper for **AMBER QM/MM** via `sander` `EXTERN` interface.
 
@@ -202,6 +203,7 @@ If you use this package, please cite:
   year         = {2026},
   version      = {1.0.0},
   url          = {https://github.com/t-0hmura/amber-mlips},
-  license      = {MIT}
+  license      = {MIT},
+  doi          = {10.5281/zenodo.18871122}
 }
 ```
