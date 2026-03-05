@@ -291,7 +291,6 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
         "AMBER_MLIPS_BACKEND",
         "AMBER_MLIPS_ML_KEYWORDS",
         "AMBER_MLIPS_SERVER_SOCKET",
-        "AMBER_MLIPS_DEBUG",
     ):
         prefix.extend(["-x", key])
 
