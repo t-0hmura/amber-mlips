@@ -16,7 +16,7 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 
 ## Quick Start (Default = UMA)
 
-0. (Optional) Install AmberTools if not already installed. **AmberTools 25** or later is recommended.
+0. (Optional) Install AmberTools if not already installed. [**AmberTools25**](https://ambermd.org/GetAmber.php) or later is recommended.
 ```bash
 conda config --add channels conda-forge
 conda config --set channel_priority strict
