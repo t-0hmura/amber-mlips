@@ -74,7 +74,9 @@ The wrapper exports key environment variables (`PATH`, `LD_LIBRARY_PATH`, `AMBER
 
 ## Conda BLAS Performance
 
-When AmberTools is installed via conda (`conda install dacase::ambertools-dac=25`) alongside xTB (`conda install conda-forge::xtb`), the conda dependency solver may replace OpenBLAS with the unoptimized **netlib** reference implementation of BLAS/LAPACK. This causes a significant slowdown for `--embedcharge`, since xTB heavily relies on BLAS/LAPACK routines.
+When AmberTools is installed via conda (`conda install ambertools-dac=25`) alongside xTB (`conda install xtb`), the conda dependency solver may replace OpenBLAS with the unoptimized **netlib** reference implementation of BLAS/LAPACK. This causes a significant slowdown for `--embedcharge`, since xTB heavily relies on BLAS/LAPACK routines.
+
+The Quick Start guide prevents this by installing xTB with explicit OpenBLAS constraints. If you have already installed xTB without the constraint, see the fix options below.
 
 **Impact:** In our benchmarks (1IL4, 50,387 atoms, 115 QM atoms), `--embedcharge` was approximately **2x slower** with netlib (~1054 ms/step) compared to OpenBLAS (~522 ms/step). Non-embedcharge runs are less affected.
 

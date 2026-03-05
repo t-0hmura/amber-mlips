@@ -19,18 +19,17 @@ AmberTools is free of charge ([GNU GPL](https://ambermd.org/AmberTools.php)); `s
 0. (Optional) Install AmberTools if not already installed. [**AmberTools25**](https://ambermd.org/GetAmber.php) or later is recommended.
 ```bash
 conda config --add channels conda-forge
+conda config --add channels dacase
 conda config --set channel_priority strict
-conda install dacase::ambertools-dac=25
+conda install ambertools-dac=25
 ```
 The conda package includes `sander`, `sander.MPI` (OpenMPI), and requires Python 3.12.
 
-> **Performance note:** The conda `ambertools-dac` package may cause the BLAS/LAPACK library to be replaced with the unoptimized netlib reference implementation, significantly slowing `--embedcharge` (xTB). This can be fixed by switching back to OpenBLAS (`conda install "libblas=*=*openblas"`). See [TECHNICAL_NOTE.md](TECHNICAL_NOTE.md#conda-blas-performance) for details.
-
 1. (Optional) Install xTB. Only needed for `--embedcharge`.
 ```bash
-conda install conda-forge::xtb
+conda install xtb "libblas=*=*openblas" "liblapack=*=*openblas"
 ```
-You can also [build from source](https://github.com/grimme-lab/xtb).
+The `libblas`/`liblapack` specs prevent the BLAS library from being replaced with the slower netlib. See [TECHNICAL_NOTE.md](TECHNICAL_NOTE.md#conda-blas-performance) for details. You can also [build xTB from source](https://github.com/grimme-lab/xtb).
 
 2. Install PyTorch suitable for your CUDA environment.
 ```bash
@@ -88,7 +87,7 @@ amber-mlips -O \
 
 Install xTB (if not already installed in Quick Start step 1):
 ```bash
-conda install conda-forge::xtb
+conda install xtb "libblas=*=*openblas" "liblapack=*=*openblas"
 ```
 
 Use `--embedcharge` in `ml_keywords`:
@@ -183,7 +182,7 @@ For internal architecture details, see [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
 ## Troubleshooting
 
 - **`amber-mlips` command not found** — Activate the conda/venv environment where the package is installed.
-- **`sander` not found** — Install AmberTools (`conda install dacase::ambertools-dac=25`), or use `--sander-bin /path/to/sander`.
+- **`sander` not found** — Install AmberTools (`conda install ambertools-dac=25`), or use `--sander-bin /path/to/sander`.
 - **UMA model download fails (401/403)** — Run `huggingface-cli login`. Some models require access approval on Hugging Face.
 - **MPI errors with `--mm-ranks > 1`** — Ensure `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
 - **Works interactively but fails in batch jobs** — Use `--sander-bin` with an absolute path.
