@@ -4,7 +4,7 @@ MLIP (Machine Learning Interatomic Potential) wrapper for **AMBER QM/MM** via `s
 
 Four model families are currently supported:
 - **UMA** ([fairchem](https://github.com/facebookresearch/fairchem)) — default model: `uma-s-1p1`
-- **ORB** ([orb-models](https://github.com/orbital-materials/orb-models)) — default model: `orb_v3_conservative_omol`
+- **ORB** ([orb-models](https://github.com/orbital-materials/orb-models)) — default model: `orb-v3-conservative-omol`
 - **MACE** ([mace](https://github.com/ACEsuit/mace)) — default model: `MACE-OMOL-0`
 - **AIMNet2** ([aimnetcentral](https://github.com/isayevlab/aimnetcentral)) — default model: `aimnet2`
 
@@ -145,7 +145,7 @@ Ready-to-run examples are in the [`examples/`](examples/) directory with a prote
 | `aimnet2.in` | AIMNet2 | `aimnet2` |
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 
-Each backend requires its own environment (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend directly:
+UMA, ORB, and AIMNet2 can share one environment; MACE requires a separate one (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend:
 ```bash
 cd examples
 amber-mlips -O -i uma.in -o uma.out -p leap.parm7 -c md.rst7 -r uma.rst7

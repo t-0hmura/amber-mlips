@@ -11,7 +11,7 @@
    - Rewrite `qm_theory` → `'EXTERN'`, remove `ml_keywords`.
    - Force `qm_ewald=0`, `qmgb=0`.
    - Remove pre-existing `&qc` blocks and append a generated one.
-4. Stage a private `qchem` shim script in a temporary directory and prepend it to `PATH`.
+4. Stage a private `qchem` shim binary in a temporary directory and prepend it to `PATH`.
 5. Export backend name and options via environment variables (`AMBER_MLIPS_BACKEND`, `AMBER_MLIPS_ML_KEYWORDS`).
 6. Launch `sander` (or `mpirun` + `sander.MPI`) with the transformed mdin.
 7. Clean up temporary files on exit.
@@ -59,7 +59,7 @@ Requires `xtb` (or explicit `--xtb-cmd`).
 The MLIP model is loaded once into a persistent server process (`plugins/mlip_server.py`) that communicates with the `qchem` shim via a Unix domain socket.
 
 - The server is started automatically when `amber-mlips` launches.
-- The `qchem` shim (called each MD step by `sander`) sends coordinates to the server and receives energy/forces back as JSON.
+- The `qchem` shim (called each MD step by `sander`) sends coordinates to the server and receives energy/forces back via a binary wire protocol.
 - This avoids reloading the model on every MD step, reducing per-step overhead to ~ms.
 - The server shuts down automatically when the parent `amber-mlips` process exits.
 
