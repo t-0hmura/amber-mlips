@@ -151,7 +151,7 @@ Ready-to-run examples are in the [`examples/`](examples/) directory with a prote
 UMA, ORB, and AIMNet2 can share one environment; MACE requires a separate one (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend:
 ```bash
 cd examples
-amber-mlips -O -i uma.in -o uma.out -p leap.parm7 -c md.rst7 -r uma.rst7
+amber-mlips --mm-ranks 16 -O -i uma.in -o uma.out -p leap.parm7 -c md.rst7 -r uma.rst7
 ```
 
 ## Performance Reference
