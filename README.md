@@ -23,7 +23,8 @@ conda config --set channel_priority strict
 conda install dacase::ambertools-dac=25
 ```
 The conda package includes `sander`, `sander.MPI` (OpenMPI), and requires Python 3.12.
-You can also [build from source](https://ambermd.org/GetAmber.php); add `-DMPI=TRUE` for `sander.MPI`.
+
+> **Performance note:** The conda `ambertools-dac` package may cause the BLAS/LAPACK library to be replaced with the unoptimized netlib reference implementation, significantly slowing `--embedcharge` (xTB). This can be fixed by switching back to OpenBLAS (`conda install "libblas=*=*openblas"`). See [TECHNICAL_NOTE.md](TECHNICAL_NOTE.md#conda-blas-performance) for details.
 
 1. (Optional) Install xTB. Only needed for `--embedcharge`.
 ```bash

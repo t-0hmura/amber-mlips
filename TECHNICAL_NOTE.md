@@ -72,6 +72,46 @@ The ML evaluation path is always single-process (non-MPI). MM-side parallelism i
 
 The wrapper exports key environment variables (`PATH`, `LD_LIBRARY_PATH`, `AMBER_MLIPS_*`) via `-x` flags so that MPI ranks inherit the correct runtime.
 
+## Conda BLAS Performance
+
+When AmberTools is installed via conda (`conda install dacase::ambertools-dac=25`) alongside xTB (`conda install conda-forge::xtb`), the conda dependency solver may replace OpenBLAS with the unoptimized **netlib** reference implementation of BLAS/LAPACK. This causes a significant slowdown for `--embedcharge`, since xTB heavily relies on BLAS/LAPACK routines.
+
+**Impact:** In our benchmarks (1IL4, 50,387 atoms, 115 QM atoms), `--embedcharge` was approximately **2x slower** with netlib (~1054 ms/step) compared to OpenBLAS (~522 ms/step). Non-embedcharge runs are less affected.
+
+### Diagnosis
+
+Check which BLAS library is linked:
+```bash
+ls -la $CONDA_PREFIX/lib/libblas.so*
+# netlib: libblas.so.3 -> libblas.so.3.11.0 (standalone file)
+# openblas: libblas.so.3 -> libopenblasp-r0.3.x.so (symlink to OpenBLAS)
+```
+
+Or check the conda package:
+```bash
+conda list libblas
+# If the build string contains "netlib", it is the slow reference implementation.
+```
+
+### Fix
+
+**Option 1:** Force OpenBLAS via conda (preferred):
+```bash
+conda install "libblas=*=*openblas" "liblapack=*=*openblas"
+```
+
+**Option 2:** If Option 1 fails due to dependency conflicts, manually redirect the symlinks:
+```bash
+cd $CONDA_PREFIX/lib
+ln -sf libopenblasp-r0.3.31.so libblas.so.3
+ln -sf libopenblasp-r0.3.31.so libcblas.so.3
+ln -sf libopenblasp-r0.3.31.so liblapack.so.3
+ln -sf libopenblasp-r0.3.31.so liblapacke.so.3
+```
+(Adjust the OpenBLAS filename to match the version installed in your environment.)
+
+**Option 3:** Alternatively, [build AmberTools from source](https://ambermd.org/GetAmber.php) with your system's optimized BLAS/LAPACK (this avoids conda BLAS conflicts entirely).
+
 ## Builtin Test Models (dummy potentials for testing)
 
 Dummy evaluators for integration testing without ML dependencies or GPU.
