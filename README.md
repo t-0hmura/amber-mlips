@@ -46,6 +46,7 @@ pip install "amber-mlips[uma]"
 ```bash
 huggingface-cli login
 ```
+> UMA model is on Hugging Face Hub. You need to log in once (See https://github.com/facebookresearch/fairchem):
 
 5. Prepare an AMBER input file. Only **`qm_theory`** and **`ml_keywords`** are plugin-specific; everything else is native AMBER `&qmmm`. For examples, see inputs in [examples/*.in](./examples/).
 ```text
