@@ -110,7 +110,8 @@ amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r 
 - `--mm-ranks 1` (default): runs `sander` directly.
 - `--mm-ranks > 1`: uses `mpirun`/`mpiexec` + `sander.MPI`. Requires AmberTools built with MPI support.
 
-> **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs. Use **AmberTools 25** or later for `--mm-ranks > 1`.
+> **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs. Use **AmberTools 25** or later for `--mm-ranks > 1`.  
+> Also place `--mm-ranks` between `amber-mlips` and `-O` (e.g., `amber-mlips --mm-ranks 16 -O ...`).
 
 ## Installing Model Families
 

@@ -38,6 +38,9 @@ amber-mlips = "amber_mlips_plugins.cli_amber:main"
 packages = ["amber_mlips_plugins"]
 include-package-data = false
 
+[tool.setuptools.package-data]
+amber_mlips_plugins = ["c_shim/*.c", "c_shim/Makefile"]
+
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"

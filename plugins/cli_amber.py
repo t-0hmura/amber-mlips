@@ -186,54 +186,72 @@ def _find_c_shim():
 
     On first invocation (or after architecture change), the C source is
     compiled automatically so the binary matches the current platform.
-    Falls back to None (Python shim) if compilation fails.
+
+    Build directories tried in order:
+      1. Package-internal c_shim/ (works in venv / conda)
+      2. $XDG_CACHE_HOME/amber-mlips/c_shim/ (fallback for read-only
+         site-packages, e.g. system-wide installs)
+
+    Falls back to None (Python shim) if compilation fails everywhere.
     """
     here = os.path.dirname(os.path.abspath(__file__))
     c_shim_dir = os.path.join(here, "c_shim")
-    binary = os.path.join(c_shim_dir, "qchem_shim")
     source = os.path.join(c_shim_dir, "qchem_shim.c")
 
-    if os.path.isfile(binary) and os.access(binary, os.X_OK):
-        # Rebuild if source is newer than binary.
-        if os.path.isfile(source):
+    if not os.path.isfile(source):
+        return None
+
+    # Candidate build directories: package-internal first, then user cache.
+    cache_dir = os.path.join(
+        os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+        "amber-mlips", "c_shim",
+    )
+    candidates = [c_shim_dir, cache_dir]
+
+    # Check for an up-to-date binary in any candidate directory.
+    for build_dir in candidates:
+        binary = os.path.join(build_dir, "qchem_shim")
+        if os.path.isfile(binary) and os.access(binary, os.X_OK):
             try:
                 if os.path.getmtime(source) <= os.path.getmtime(binary):
                     return binary
             except OSError:
                 return binary
-        else:
+
+    # Auto-build: try each candidate directory until one succeeds.
+    cc = os.environ.get("CC", "cc")
+    for build_dir in candidates:
+        binary = os.path.join(build_dir, "qchem_shim")
+        try:
+            os.makedirs(build_dir, exist_ok=True)
+        except OSError:
+            continue
+
+        cmd = [cc, "-O2", "-Wall", "-o", binary, source, "-lm"]
+        print(
+            "[amber-mlips] Building C shim: {}".format(" ".join(cmd)),
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            subprocess.check_call(cmd, cwd=build_dir, timeout=60)
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            continue
+
+        if os.path.isfile(binary) and os.access(binary, os.X_OK):
+            print(
+                "[amber-mlips] C shim built successfully: {}".format(binary),
+                file=sys.stderr,
+                flush=True,
+            )
             return binary
 
-    # Source must exist for auto-build.
-    if not os.path.isfile(source):
-        return None
-
-    # Auto-build: compile the C shim for this architecture.
-    cc = os.environ.get("CC", "cc")
-    cmd = [cc, "-O2", "-Wall", "-o", binary, source, "-lm"]
     print(
-        "[amber-mlips] Building C shim: {}".format(" ".join(cmd)),
+        "[amber-mlips] WARNING: C shim build failed, "
+        "falling back to Python shim.",
         file=sys.stderr,
         flush=True,
     )
-    try:
-        subprocess.check_call(cmd, cwd=c_shim_dir, timeout=60)
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
-        print(
-            "[amber-mlips] WARNING: C shim build failed ({}), "
-            "falling back to Python shim.".format(exc),
-            file=sys.stderr,
-            flush=True,
-        )
-        return None
-
-    if os.path.isfile(binary) and os.access(binary, os.X_OK):
-        print(
-            "[amber-mlips] C shim built successfully: {}".format(binary),
-            file=sys.stderr,
-            flush=True,
-        )
-        return binary
     return None
 
 
