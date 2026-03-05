@@ -9,6 +9,9 @@ build/
 dist/
 *.egg-info/
 
+# Compiled C shim binary
+plugins/c_shim/qchem_shim
+
 # Example output files
 examples/_output/
 examples/*.out
