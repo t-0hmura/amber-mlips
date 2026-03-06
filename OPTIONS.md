@@ -60,11 +60,12 @@ When `--embedcharge` is enabled, xTB must be available in the current environmen
 
 ## UMA Options
 
-Available models (default: **`uma-s-1p1`**):
+Available models (default: **`uma-s-1p2`**):
 
 | Model | Description |
 |-------|-------------|
 | `uma-s-1p1` | Small model, fastest while still SOTA on most benchmarks (6.6M/150M active/total params) |
+| `uma-s-1p2` | Small model v1.2, ~50% faster & ~40% more accurate on OMol (6.6M/290M active/total params) |
 | `uma-m-1p1` | Best across all metrics, slower and more memory-intensive (50M/1.4B active/total params) |
 
 Additional `esen-*` variants are also available. Models are hosted on Hugging Face Hub (`huggingface-cli login` required).
@@ -77,7 +78,7 @@ Additional `esen-*` variants are also available. Models are hosted on Hugging Fa
 Example:
 ```text
   qm_theory='uma',
-  ml_keywords='--model uma-s-1p1',
+  ml_keywords='--model uma-s-1p2',
 ```
 
 ## ORB Options

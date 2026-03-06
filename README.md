@@ -4,7 +4,7 @@
 MLIP (Machine Learning Interatomic Potential) wrapper for **AMBER QM/MM** via `sander` `EXTERN` interface.
 
 Four model families are currently supported:
-- **UMA** ([fairchem](https://github.com/facebookresearch/fairchem)) — default model: `uma-s-1p1`
+- **UMA** ([fairchem](https://github.com/facebookresearch/fairchem)) — default model: `uma-s-1p2`
 - **ORB** ([orb-models](https://github.com/orbital-materials/orb-models)) — default model: `orb-v3-conservative-omol`
 - **MACE** ([mace](https://github.com/ACEsuit/mace)) — default model: `MACE-OMOL-0`
 - **AIMNet2** ([aimnetcentral](https://github.com/isayevlab/aimnetcentral)) — default model: `aimnet2`
@@ -62,7 +62,7 @@ huggingface-cli login
   qmcharge=0,
   spin=1,
   qm_theory='uma',
-  ml_keywords='--model uma-s-1p1',
+  ml_keywords='--model uma-s-1p2',
   qmcut=12.0,
   qmshake=0,
  /
@@ -94,7 +94,7 @@ conda install xtb "libblas=*=*openblas" "liblapack=*=*openblas"
 
 Use `--embedcharge` in `ml_keywords`:
 ```text
-  ml_keywords='--model uma-s-1p1 --embedcharge',
+  ml_keywords='--model uma-s-1p2 --embedcharge',
 ```
 
 This computes `dE = E_xTB(embed) - E_xTB(no-embed)` and adds the correction to MLIP energy and forces.

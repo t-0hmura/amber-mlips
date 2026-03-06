@@ -238,7 +238,7 @@ def _create_evaluator(args):
 
     if backend == "uma":
         return UMAEvaluator(
-            model=model or "uma-s-1p1",
+            model=model or "uma-s-1p2",
             task=args.uma_task,
             device=args.device,
             workers=max(1, int(args.uma_workers)),
