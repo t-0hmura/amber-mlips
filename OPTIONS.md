@@ -60,7 +60,7 @@ When `--embedcharge` is enabled, xTB must be available in the current environmen
 
 ## UMA Options
 
-Available models (default: **`uma-s-1p2`**):
+Available models (default: **`uma-s-1p1`**):
 
 | Model | Description |
 |-------|-------------|
@@ -78,7 +78,7 @@ Additional `esen-*` variants are also available. Models are hosted on Hugging Fa
 Example:
 ```text
   qm_theory='uma',
-  ml_keywords='--model uma-s-1p2',
+  ml_keywords='--model uma-s-1p1',
 ```
 
 ## ORB Options
