@@ -221,7 +221,7 @@ class MLIPServer(object):
     """Single-threaded Unix domain socket server wrapping an evaluator."""
 
     def __init__(self, evaluator, socket_path, idle_timeout=600, parent_pid=None,
-                 embedcharge_opts=None, solvent_opts=None, cell=None):
+                 embedcharge_opts=None, solvent_opts=None):
         self.evaluator = evaluator
         self.socket_path = os.path.abspath(socket_path)
         self.idle_timeout = float(idle_timeout)
@@ -234,9 +234,6 @@ class MLIPServer(object):
         # solvent_opts: dict with keys solvent, solvent_model, xtb_cmd, xtb_acc,
         # xtb_workdir, xtb_keep_files, ncores — or None if solvent is disabled.
         self._solvent_opts = dict(solvent_opts) if solvent_opts else None
-        # Cell parameters for PBC: numpy (2,3) [[Lx,Ly,Lz],[a,b,g]] or None.
-        # Set once at server startup (NVT: cell is constant).
-        self._cell = np.asarray(cell, dtype=np.float64).reshape(2, 3) if cell is not None else None
 
         # Persistent xTB worker pool for embedcharge correction.
         self._embedcharge_pool = None
@@ -403,13 +400,6 @@ class MLIPServer(object):
             hessian_mode = str(request.get("hessian_mode", "Analytical"))
             hessian_step = float(request.get("hessian_step", 1.0e-3))
 
-            # Per-step cell from client (NPT), falling back to startup cell (NVT).
-            cell_ang_req = request.get("cell_ang")
-            if cell_ang_req is not None:
-                cell = np.asarray(cell_ang_req, dtype=np.float64).reshape(2, 3)
-            else:
-                cell = self._cell
-
             energy_ev, forces_ev_ang, hess_ev_ang2 = self.evaluator.evaluate(
                 symbols=symbols,
                 coords_ang=coords_ang,
@@ -419,7 +409,6 @@ class MLIPServer(object):
                 need_hessian=need_hessian,
                 hessian_mode=hessian_mode,
                 hessian_step=hessian_step,
-                cell=cell,
             )
 
             # Apply embedcharge correction if MM data is present and enabled.

@@ -10,7 +10,6 @@
  *     AMBER_MLIPS_SERVER_SOCKET  path to Unix domain socket
  *     AMBER_MLIPS_BACKEND        backend name (informational)
  *     AMBER_MLIPS_ML_KEYWORDS    ml_keywords string (checked for --embedcharge)
- *     AMBER_MLIPS_CELL_FILE      path to AMBER restart file (for NPT cell updates)
  *
  * Wire protocol: 4-byte big-endian length prefix + payload.
  *   Payload format auto-detected by first byte:
@@ -242,45 +241,6 @@ static int parse_qchem_input(
 }
 
 /* ------------------------------------------------------------------ */
-/* Read cell (box) from AMBER restart file                            */
-/* ------------------------------------------------------------------ */
-
-/* Read cell parameters from the last line of an AMBER restart file.
- * Returns 0 on success (cell_out filled with Lx,Ly,Lz,alpha,beta,gamma),
- * -1 on failure (file missing, no box line, parse error). */
-static int read_cell_from_restart(const char *path, double cell_out[6]) {
-    FILE *fp = fopen(path, "r");
-    if (!fp) return -1;
-
-    char last_line[LINE_BUF] = {0};
-    char line[LINE_BUF];
-    while (fgets(line, sizeof(line), fp)) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p != '\0' && *p != '\n' && *p != '\r') {
-            memcpy(last_line, line, sizeof(last_line) - 1);
-            last_line[sizeof(last_line) - 1] = '\0';
-        }
-    }
-    fclose(fp);
-
-    if (last_line[0] == '\0') return -1;
-
-    double a, b, c, al, be, ga;
-    if (sscanf(last_line, "%lf %lf %lf %lf %lf %lf", &a, &b, &c, &al, &be, &ga) != 6)
-        return -1;
-
-    /* Sanity: lengths must be positive, no NaN/Inf */
-    if (a <= 0.0 || b <= 0.0 || c <= 0.0) return -1;
-    if (!isfinite(a) || !isfinite(b) || !isfinite(c) ||
-        !isfinite(al) || !isfinite(be) || !isfinite(ga)) return -1;
-
-    cell_out[0] = a;  cell_out[1] = b;   cell_out[2] = c;
-    cell_out[3] = al; cell_out[4] = be;  cell_out[5] = ga;
-    return 0;
-}
-
-/* ------------------------------------------------------------------ */
 /* Build JSON request                                                 */
 /* ------------------------------------------------------------------ */
 /* Legacy JSON builder — kept for reference / fallback testing. */
@@ -421,8 +381,7 @@ static int send_request_bin(
     int fd,
     const QMAtom *qm, int nqm,
     int charge, int spinmult,
-    const double mm_coords[][3], const double *mm_charges, int nmm,
-    const double *cell_ang   /* NULL or double[6]: Lx,Ly,Lz,alpha,beta,gamma */
+    const double mm_coords[][3], const double *mm_charges, int nmm
 ) {
     /* 1) Build JSON metadata (small: symbols + scalars + _bin descriptor) */
     size_t cap = (size_t)(nqm * 10 + 512);
@@ -448,9 +407,6 @@ static int send_request_bin(
             ",\"mm_coords_ang\":[%d,3],\"mm_charges\":[%d]",
             nmm, nmm);
     }
-    if (cell_ang) {
-        off += snprintf(meta + off, cap - off, ",\"cell_ang\":[2,3]");
-    }
     off += snprintf(meta + off, cap - off, "}}");
 
     uint32_t json_len = (uint32_t)off;
@@ -459,8 +415,7 @@ static int send_request_bin(
     size_t coords_bytes = (size_t)nqm * 3 * sizeof(double);
     size_t mm_coords_bytes = (nmm > 0) ? (size_t)nmm * 3 * sizeof(double) : 0;
     size_t mm_charges_bytes = (nmm > 0) ? (size_t)nmm * sizeof(double) : 0;
-    size_t cell_bytes = cell_ang ? 6 * sizeof(double) : 0;
-    size_t array_total = coords_bytes + mm_coords_bytes + mm_charges_bytes + cell_bytes;
+    size_t array_total = coords_bytes + mm_coords_bytes + mm_charges_bytes;
 
     /* 3) Assemble binary payload: magic(1) + json_len(4) + json + arrays */
     size_t payload_len = 1 + 4 + json_len + array_total;
@@ -487,10 +442,6 @@ static int send_request_bin(
     /* Pack mm_charges */
     if (nmm > 0 && mm_charges_bytes > 0) {
         memcpy(payload + p, mm_charges, mm_charges_bytes); p += mm_charges_bytes;
-    }
-    /* Pack cell_ang (NPT: per-step cell from restart file) */
-    if (cell_ang && cell_bytes > 0) {
-        memcpy(payload + p, cell_ang, cell_bytes); p += cell_bytes;
     }
 
     /* 4) Send: [4-byte total length][payload] */
@@ -526,6 +477,10 @@ static int recv_and_parse_response(
         uint32_t net_jlen;
         memcpy(&net_jlen, buf + 1, 4);
         uint32_t jlen = ntohl(net_jlen);
+        if (5 + jlen > len) {
+            fprintf(stderr, "[c-shim] Binary json_len exceeds payload (%u + 5 > %u)\n", jlen, len);
+            free(buf); return -1;
+        }
         char *json_meta = buf + 5;
         json_meta[jlen] = '\0';  /* null-terminate JSON portion */
 
@@ -658,7 +613,6 @@ static int evaluate_via_server(
     const QMAtom *qm, int nqm,
     int charge, int spinmult,
     const double mm_coords[][3], const double *mm_charges, int nmm,
-    const double *cell_ang,              /* NULL or double[6] for NPT */
     double *energy_ev,                   /* out */
     double forces_ev_ang[][3],           /* out: nqm x 3 */
     double forces_mm_ev_ang[][3],        /* out: nmm x 3, may be NULL */
@@ -686,7 +640,7 @@ static int evaluate_via_server(
     }
 
     /* Send binary request */
-    if (send_request_bin(fd, qm, nqm, charge, spinmult, mm_coords, mm_charges, nmm, cell_ang) != 0) {
+    if (send_request_bin(fd, qm, nqm, charge, spinmult, mm_coords, mm_charges, nmm) != 0) {
         fprintf(stderr, "[c-shim] send failed\n");
         close(fd); return -1;
     }
@@ -779,24 +733,12 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    /* Read cell from AMBER restart file for NPT support.
-     * If AMBER_MLIPS_CELL_FILE is set and the file has a valid box line,
-     * cell_ang is sent to the server.  Otherwise NULL (server uses startup cell). */
-    const char *cell_file = getenv("AMBER_MLIPS_CELL_FILE");
-    double cell_buf[6];
-    const double *cell_ang = NULL;
-    if (cell_file && cell_file[0]) {
-        if (read_cell_from_restart(cell_file, cell_buf) == 0)
-            cell_ang = cell_buf;
-    }
-
     /* Evaluate via server (MM data included for server-side embedcharge) */
     double energy_ev = 0.0;
     int ok = 0;
 
     if (evaluate_via_server(socket_path, qm, nqm, charge, spinmult,
                             (const double (*)[3])mm_coords, mm_charges, nmm,
-                            cell_ang,
                             &energy_ev, forces_ev_ang, forces_mm_ev_ang, &ok) != 0 || !ok)
         goto cleanup;
 
