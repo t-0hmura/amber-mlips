@@ -4,7 +4,7 @@ ML-only NVT MD with UMA (all atoms computed by MLIP, no MM)
   irest=0,           ! New simulation (no velocities in coordinate file)
   ntx=1,             ! Read coordinates only
   dt=0.001,          ! Time step in ps (1 fs)
-  nstlim=50,         ! Number of MD steps
+  nstlim=20,         ! Number of MD steps
   ntc=1, ntf=1,      ! No SHAKE; compute all interactions
   ig=-1,             ! Random seed
   cut=3.0,           ! Dummy small value (ML computes all forces; MM cutoff unused)
@@ -27,5 +27,5 @@ ML-only NVT MD with UMA (all atoms computed by MLIP, no MM)
   qm_theory='uma',   ! MLIP backend
   ml_keywords='--model uma-s-1p1 --uma-task omat', ! PBC-aware model (omat task)
   qmshake=0,         ! No SHAKE on ML atoms (=all atoms)
-  qmcut=3.0,         ! Must match cut (sander PBC check; all atoms are QM)
+  qmcut=0.0,         ! Must be 0 for ML-only PBC (sander QM periodic check)
  /

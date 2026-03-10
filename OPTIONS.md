@@ -70,7 +70,7 @@ Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Recommended settings:
 | `cut` | `3.0` (PBC) or `999.0` (non-periodic) | PBC: small dummy value; non-periodic: large value required by sander |
 | `ntc`, `ntf` | `1`, `1` | No SHAKE constraints |
 | `qmshake` | `0` | No SHAKE on QM atoms |
-| `qmcut` | `3.0` (PBC) or `0.0` (non-periodic) | PBC: must match `cut` (sander checks QM region + qmcut < box) |
+| `qmcut` | `0.0` | Must be 0 for ML-only PBC (sander checks QM region + qmcut < box) |
 | `ntb` | `1` (NVT), `2` (NPT), or `0` (non-periodic) | PBC or gas-phase |
 | `--uma-task` | `omat` | PBC-aware model for periodic systems |
 
