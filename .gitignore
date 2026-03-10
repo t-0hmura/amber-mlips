@@ -12,12 +12,18 @@ dist/
 # Compiled C shim binary
 plugins/c_shim/qchem_shim
 
-# Example output files
+# Example output files (keep only .in, .parm7, .rst7, .pdb, .sh)
 examples/_output/
 examples/*.out
 examples/*.nc
 examples/*.info
 examples/*.log
+examples/mdcrd
+examples/mdinfo
+examples/old.*
+examples/qc_job.*
+examples/*.o[0-9]*
+examples/*.e[0-9]*
 
 # Misc
 tmp_real_mlip_*/
