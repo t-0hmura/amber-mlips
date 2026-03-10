@@ -101,7 +101,7 @@ This computes `dE = E_xTB(embed) - E_xTB(no-embed)` and adds the correction to M
 
 ## ML-Only MD (Full-System MLIP)
 
-See [`ML_ONLY_MD.md`](ML_ONLY_MD.md) for full-system MLIP molecular dynamics (`qmmask='@*'`), including PBC (NVT/NPT) and implicit solvent setups.
+See [`ML_ONLY_MD.md`](ML_ONLY_MD.md) for full-system MLIP molecular dynamics (`qmmask='@*'`) with implicit solvent (non-periodic only).
 
 ## MM MPI Parallelism
 
@@ -151,9 +151,7 @@ Ready-to-run examples are in the [`examples/`](examples/) directory with a prote
 | `mace.in` | MACE | `MACE-OMOL-0` |
 | `aimnet2.in` | AIMNet2 | `aimnet2` |
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
-| `uma_mlonly.in` | UMA | ML-only PBC MD (all atoms by MLIP, NVT) |
-| `uma_mlonly_npt.in` | UMA | ML-only PBC MD (NPT, requires `ntwr=1, ntxo=1`) |
-| `uma_mlonly_implicit.in` | UMA | ML-only + xTB implicit solvent (ALPB) |
+| `uma_mlonly_implicit.in` | UMA | ML-only + xTB implicit solvent (non-periodic, ALPB) |
 
 UMA, ORB, and AIMNet2 can share one environment; MACE requires a separate one (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend:
 ```bash

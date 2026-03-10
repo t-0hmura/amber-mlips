@@ -62,17 +62,16 @@ When `--embedcharge` or `--solvent` is enabled, xTB must be available in the cur
 
 ### ML-Only MD
 
-Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Recommended settings:
+Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Non-periodic only (`ntb=0`).
 
 | Setting | Value | Reason |
 |---------|-------|--------|
 | `qmmask` | `'@*'` | ALL atoms → pure ML MD |
-| `cut` | `3.0` (PBC) or `999.0` (non-periodic) | PBC: small dummy value; non-periodic: large value required by sander |
+| `ntb` | `0` | Non-periodic (PBC ML-only not supported) |
+| `cut` | `999.0` | Large cutoff for non-periodic |
 | `ntc`, `ntf` | `1`, `1` | No SHAKE constraints |
 | `qmshake` | `0` | No SHAKE on QM atoms |
-| `qmcut` | `0.0` | Must be 0 for ML-only PBC (sander checks QM region + qmcut < box) |
-| `ntb` | `1` (NVT), `2` (NPT), or `0` (non-periodic) | PBC or gas-phase |
-| `--uma-task` | `omat` | PBC-aware model for periodic systems |
+| `qmcut` | `0.0` | No QM/MM cutoff |
 
 ## UMA Options
 

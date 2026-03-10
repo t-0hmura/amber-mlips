@@ -4,9 +4,8 @@
 
 ### New Features
 
-- **ML-Only MD** (`qmmask='@*'`): Full-system MLIP molecular dynamics
-  - PBC: NVT (`ntb=1`) and NPT (`ntb=2`, per-step cell update, `ntwr=1, ntxo=1` required)
-  - Implicit solvent: xTB ALPB/CPCMX correction via `--solvent <name>` in `ml_keywords` without PBC
+- **ML-Only MD** (`qmmask='@*'`): Full-system MLIP molecular dynamics (non-periodic only)
+  - Implicit solvent: xTB ALPB/CPCMX correction via `--solvent <name>` in `ml_keywords`
 
 ### Bug Fixes
 
@@ -16,7 +15,6 @@
 
 ### Other
 
-- New examples: `uma_mlonly.in`, `uma_mlonly_npt.in`, `uma_mlonly_implicit.in`
+- New example: `uma_mlonly_implicit.in`
 - New documentation: `ML_ONLY_MD.md`
 - Binary protocol: fixed response array order (`_RESPONSE_ARRAY_ORDER`)
-- PBC + implicit solvent mutual exclusion warning
