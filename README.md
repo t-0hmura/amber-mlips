@@ -208,7 +208,7 @@ If you use this package, please cite:
   author       = {Ohmura, Takuto},
   title        = {amber-mlips},
   year         = {2026},
-  version      = {1.0.0},
+  version      = {1.1.1},
   url          = {https://github.com/t-0hmura/amber-mlips},
   license      = {MIT},
   doi          = {10.5281/zenodo.18942483}
