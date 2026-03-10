@@ -15,3 +15,11 @@ amber-mlips --mm-ranks 16 -O -i aimnet2.in -o aimnet2.out -p leap.parm7 -c md.rs
 
 # --- UMA + embedcharge ---
 amber-mlips --mm-ranks 16 -O -i uma_embedcharge.in -o uma_embedcharge.out -p leap.parm7 -c md.rst7 -r uma_embedcharge.rst7
+
+# --- ML-Only MD ---
+# NVT
+amber-mlips -O -i uma_mlonly.in -o mlonly_nvt.out -p waterbox.parm7 -c waterbox.rst7 -r mlonly_nvt.rst7
+# NPT (requires ntwr=1, ntxo=1 in mdin)
+amber-mlips -O -i uma_mlonly_npt.in -o mlonly_npt.out -p waterbox.parm7 -c waterbox.rst7 -r mlonly_npt.rst7
+# Implicit solvent (non-periodic, single molecule)
+amber-mlips -O -i uma_mlonly_implicit.in -o mlonly_implicit.out -p water.parm7 -c water.rst7 -r mlonly_implicit.rst7
