@@ -1,8 +1,8 @@
 ML-only NVT MD with UMA (all atoms computed by MLIP, no MM)
  &cntrl
   imin=0,            ! Run molecular dynamics
-  irest=1,           ! Restart simulation
-  ntx=5,             ! Read coordinates and velocities
+  irest=0,           ! New simulation (no velocities in coordinate file)
+  ntx=1,             ! Read coordinates only
   dt=0.001,          ! Time step in ps (1 fs)
   nstlim=50,         ! Number of MD steps
   ntc=1, ntf=1,      ! No SHAKE; compute all interactions
