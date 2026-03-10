@@ -367,10 +367,23 @@ def get_available_aimnet2_models():
     return _unique_ordered(out)
 
 
+def _apply_cell_to_atoms(atoms, cell):
+    """Apply cell info (2x3 array: [[Lx,Ly,Lz],[alpha,beta,gamma]]) to ASE Atoms."""
+    if cell is None:
+        return
+    from ase.geometry import cellpar_to_cell as _cellpar_to_cell
+
+    cell = np.asarray(cell, dtype=np.float64).reshape(2, 3)
+    cellpar = [cell[0, 0], cell[0, 1], cell[0, 2],
+               cell[1, 0], cell[1, 1], cell[1, 2]]
+    atoms.cell = _cellpar_to_cell(cellpar)
+    atoms.pbc = True
+
+
 class _BackendBase(object):
     """Shared evaluator behavior."""
 
-    def energy_forces(self, symbols, coords_ang, charge, multiplicity):
+    def energy_forces(self, symbols, coords_ang, charge, multiplicity, cell=None):
         raise NotImplementedError
 
     def analytical_hessian(self, symbols, coords_ang, charge, multiplicity):
@@ -386,6 +399,7 @@ class _BackendBase(object):
         need_hessian,
         hessian_mode,
         hessian_step,
+        cell=None,
     ):
         coords_ang = np.asarray(coords_ang, dtype=np.float64).reshape(-1, 3)
 
@@ -396,7 +410,7 @@ class _BackendBase(object):
             if use_analytical:
                 try:
                     e_ev, f_ev_ang = self.energy_forces(
-                        symbols, coords_ang, charge, multiplicity
+                        symbols, coords_ang, charge, multiplicity, cell=cell
                     )
                     h_ev_ang2 = self.analytical_hessian(
                         symbols, coords_ang, charge, multiplicity
@@ -413,17 +427,17 @@ class _BackendBase(object):
 
             # Numerical mode
             e_ev, f_ev_ang, h_ev_ang2 = _numerical_hessian_from_forces(
-                lambda x: self.energy_forces(symbols, x, charge, multiplicity),
+                lambda x: self.energy_forces(symbols, x, charge, multiplicity, cell=cell),
                 coords_ang,
                 float(hessian_step),
             )
             return float(e_ev), np.asarray(f_ev_ang, dtype=np.float64), h_ev_ang2
 
         if need_forces:
-            e_ev, f_ev_ang = self.energy_forces(symbols, coords_ang, charge, multiplicity)
+            e_ev, f_ev_ang = self.energy_forces(symbols, coords_ang, charge, multiplicity, cell=cell)
             return float(e_ev), np.asarray(f_ev_ang, dtype=np.float64), None
 
-        e_ev, _f = self.energy_forces(symbols, coords_ang, charge, multiplicity)
+        e_ev, _f = self.energy_forces(symbols, coords_ang, charge, multiplicity, cell=cell)
         return float(e_ev), None, None
 
 
@@ -513,10 +527,11 @@ class UMAEvaluator(_BackendBase):
         self._collater = data_list_collater
         self._has_torch_model = hasattr(self._predictor, "model")
 
-    def energy_forces(self, symbols, coords_ang, charge, multiplicity):
+    def energy_forces(self, symbols, coords_ang, charge, multiplicity, cell=None):
         from ase import Atoms
 
         atoms = Atoms(symbols=symbols, positions=np.asarray(coords_ang, dtype=np.float64))
+        _apply_cell_to_atoms(atoms, cell)
         atoms.info["charge"] = int(charge)
         atoms.info["spin"] = int(multiplicity)
         atoms.calc = self._ase_calc
@@ -748,10 +763,11 @@ class OrbMolEvaluator(_BackendBase):
 
         raise BackendError("Failed to build ORBCalculator.")
 
-    def energy_forces(self, symbols, coords_ang, charge, multiplicity):
+    def energy_forces(self, symbols, coords_ang, charge, multiplicity, cell=None):
         from ase import Atoms
 
         atoms = Atoms(symbols=symbols, positions=np.asarray(coords_ang, dtype=np.float64))
+        _apply_cell_to_atoms(atoms, cell)
         atoms.info["charge"] = float(charge)
         atoms.info["spin"] = float(multiplicity)
         atoms.calc = self._ase_calc
@@ -999,10 +1015,11 @@ class MACEEvaluator(_BackendBase):
             )
         )
 
-    def energy_forces(self, symbols, coords_ang, charge, multiplicity):
+    def energy_forces(self, symbols, coords_ang, charge, multiplicity, cell=None):
         from ase import Atoms
 
         atoms = Atoms(symbols=symbols, positions=np.asarray(coords_ang, dtype=np.float64))
+        _apply_cell_to_atoms(atoms, cell)
         # Some backends may inspect these fields; harmless if ignored.
         atoms.info["charge"] = int(charge)
         atoms.info["spin"] = int(multiplicity)
@@ -1195,7 +1212,7 @@ class AIMNet2Evaluator(_BackendBase):
                 )
         return energy, forces, hess
 
-    def energy_forces(self, symbols, coords_ang, charge, multiplicity):
+    def energy_forces(self, symbols, coords_ang, charge, multiplicity, cell=None):
         energy, forces, _ = self._call(symbols, coords_ang, charge, multiplicity, with_hessian=False)
         return energy, np.asarray(forces, dtype=np.float64)
 

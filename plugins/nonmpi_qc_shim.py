@@ -36,7 +36,7 @@ from .mlip_backends import (
     forces_ev_ang_to_gradient_ha_bohr,
 )
 from .mlip_server import ServerError, client_evaluate
-from .xtb_alpb_correction import XTBError
+from .xtb_alpb_correction import XTBError, delta_alpb_minus_vac, solvent_correction_enabled
 from .xtb_embedcharge_correction import delta_embedcharge_minus_noembed
 
 
@@ -198,11 +198,13 @@ def _build_keyword_parser():
     parser.add_argument("--model", default=None, help="Model alias/path.")
     parser.add_argument("--device", default="auto", help="cpu|cuda|auto")
     parser.add_argument("--embedcharge", action="store_true", help="Enable xTB point-charge embedding correction.")
-    parser.add_argument("--xtb-cmd", default="xtb", help="xTB executable for --embedcharge correction.")
-    parser.add_argument("--xtb-acc", type=float, default=0.2, help="xTB --acc value for embedcharge correction.")
-    parser.add_argument("--xtb-workdir", default="tmp", help="xTB scratch base dir for embedcharge correction.")
+    parser.add_argument("--solvent", default="none", help="xTB implicit-solvent name (e.g. water, methanol). Set 'none' to disable.")
+    parser.add_argument("--solvent-model", default="alpb", choices=("alpb", "cpcmx"), help="Implicit solvent model: alpb or cpcmx.")
+    parser.add_argument("--xtb-cmd", default="xtb", help="xTB executable for --embedcharge/--solvent correction.")
+    parser.add_argument("--xtb-acc", type=float, default=0.2, help="xTB --acc value for corrections.")
+    parser.add_argument("--xtb-workdir", default="tmp", help="xTB scratch base dir for corrections.")
     parser.add_argument("--xtb-keep-files", action="store_true", help="Keep xTB scratch directories for debugging.")
-    parser.add_argument("--xtb-ncores", type=int, default=4, help="xTB OMP threads for embedcharge correction.")
+    parser.add_argument("--xtb-ncores", type=int, default=4, help="xTB OMP threads for corrections.")
 
     # UMA
     parser.add_argument("--uma-task", default="omol")
@@ -396,6 +398,33 @@ def run_qchem(inpfile, logfile, savfile, backend, ml_keywords, env_debug=False, 
         forces_q = forces_q + df_full[:nq, :]
         if ncl > 0:
             forces_m = forces_m + df_full[nq:, :]
+
+    # Implicit solvent correction: dE = E_xTB(solv) - E_xTB(vac).
+    if solvent_correction_enabled(kw_args.solvent):
+        try:
+            de_solv, df_solv, _ = delta_alpb_minus_vac(
+                symbols=symbols,
+                coords_ang=coords_q,
+                charge=int(charge),
+                multiplicity=int(spinmult),
+                solvent=kw_args.solvent,
+                need_forces=True,
+                need_hessian=False,
+                solvent_model=kw_args.solvent_model,
+                xtb_cmd=kw_args.xtb_cmd,
+                xtb_acc=float(kw_args.xtb_acc),
+                xtb_workdir=kw_args.xtb_workdir,
+                xtb_keep_files=bool(kw_args.xtb_keep_files),
+                ncores=int(kw_args.xtb_ncores),
+            )
+        except XTBError as exc:
+            raise QCShimError(
+                "Implicit solvent correction failed. Details: {}".format(exc)
+            ) from exc
+
+        energy_ev += float(de_solv)
+        df_solv = np.asarray(df_solv, dtype=np.float64).reshape(nq, 3)
+        forces_q = forces_q + df_solv
 
     energy_ha = float(ev_to_ha(energy_ev))
 

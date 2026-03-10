@@ -49,6 +49,8 @@ On launch, `amber-mlips` transforms the input:
 | `--model <name>` | Model name, alias, or local path |
 | `--device auto\|cpu\|cuda` | Compute device (default: `auto`) |
 | `--embedcharge` | Enable xTB point-charge embedding correction |
+| `--solvent <name>` | xTB implicit solvent name (default: `none`). E.g., `water`, `methanol`, `dmso` |
+| `--solvent-model <alpb\|cpcmx>` | Implicit solvent model (default: `alpb`) |
 | `--xtb-cmd <path>` | xTB executable (default: `xtb`) |
 | `--xtb-acc <float>` | xTB accuracy parameter (default: `0.2`) |
 | `--xtb-ncores <int>` | CPU cores for xTB (default: `4`) |
@@ -56,7 +58,21 @@ On launch, `amber-mlips` transforms the input:
 | `--xtb-keep-files` | Keep xTB temporary files for debugging |
 | `--debug` | Verbose shim logs |
 
-When `--embedcharge` is enabled, xTB must be available in the current environment/path.
+When `--embedcharge` or `--solvent` is enabled, xTB must be available in the current environment/path.
+
+### ML-Only MD
+
+Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Recommended settings:
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| `qmmask` | `'@*'` | ALL atoms → pure ML MD |
+| `cut` | `3.0` (PBC) or `999.0` (non-periodic) | PBC: small dummy value; non-periodic: large value required by sander |
+| `ntc`, `ntf` | `1`, `1` | No SHAKE constraints |
+| `qmshake` | `0` | No SHAKE on QM atoms |
+| `qmcut` | `0.0` | No QM/MM cutoff needed |
+| `ntb` | `1` (NVT), `2` (NPT), or `0` (non-periodic) | PBC or gas-phase |
+| `--uma-task` | `omat` | PBC-aware model for periodic systems |
 
 ## UMA Options
 

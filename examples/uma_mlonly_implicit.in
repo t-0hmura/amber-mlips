@@ -1,0 +1,30 @@
+ML-only MD with UMA + xTB implicit solvent (ALPB, non-periodic)
+ &cntrl
+  imin=0,            ! Run molecular dynamics
+  irest=0,           ! New simulation
+  ntx=1,             ! Read coordinates only
+  dt=0.001,          ! Time step in ps (1 fs)
+  nstlim=50,         ! Number of MD steps
+  ntc=1, ntf=1,      ! No SHAKE; compute all interactions
+  ig=-1,             ! Random seed
+  cut=999.0,         ! Large cutoff for non-periodic (no box size constraint)
+  ntb=0,             ! No periodic boundary (non-periodic + implicit solvent)
+  ntp=0,             ! No pressure control
+  ntpr=10,           ! Print energy every 10 steps
+  ntwx=10,           ! Write trajectory every 10 steps
+  ntt=3,             ! Langevin thermostat
+  gamma_ln=5.0,      ! Langevin collision frequency (ps^-1)
+  temp0=300.0,       ! Target temperature (K)
+  ioutfm=1,          ! NetCDF trajectory format
+  iwrap=0,           ! No wrapping (non-periodic)
+  ifqnt=1,           ! Enable QM/MM (EXTERN interface)
+ /
+ &qmmm
+  qmmask='@*',       ! ALL atoms → pure ML MD
+  qmcharge=0,        ! Net charge of system
+  spin=1,            ! Spin multiplicity
+  qm_theory='uma',   ! MLIP backend
+  ml_keywords='--model uma-s-1p1 --solvent water --solvent-model alpb',
+  qmshake=0,         ! No SHAKE
+  qmcut=0.0,         ! No QM/MM cutoff (all atoms are QM)
+ /

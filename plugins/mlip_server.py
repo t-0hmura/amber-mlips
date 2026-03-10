@@ -180,22 +180,25 @@ def _recv_msg_auto(sock):
 def _send_msg_auto(sock, obj, fmt="json"):
     """Send response matching the client's format."""
     if fmt == "bin":
-        # Separate numpy arrays from the dict.
+        # Separate numpy arrays from the dict in a FIXED ORDER.
+        # The C shim reads binary arrays positionally, so the order must
+        # match: forces_ev_ang, hessian_ev_ang2, forces_mm_ev_ang.
+        _RESPONSE_ARRAY_ORDER = (
+            "forces_ev_ang", "hessian_ev_ang2", "forces_mm_ev_ang",
+        )
         meta = {}
         arrays = []
+        array_keys = set()
+        for k in _RESPONSE_ARRAY_ORDER:
+            v = obj.get(k)
+            if v is not None and isinstance(v, np.ndarray):
+                arrays.append((k, v))
+                array_keys.add(k)
         for k, v in obj.items():
+            if k in array_keys:
+                continue
             if isinstance(v, np.ndarray):
                 arrays.append((k, v))
-            elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], (list, float, int)):
-                # Heuristic: large nested lists that were numpy arrays.
-                try:
-                    arr = np.asarray(v, dtype=np.float64)
-                    if arr.size > 20:
-                        arrays.append((k, arr))
-                        continue
-                except (ValueError, TypeError):
-                    pass
-                meta[k] = v
             else:
                 meta[k] = v
         _send_msg_bin(sock, meta, arrays)
@@ -218,7 +221,7 @@ class MLIPServer(object):
     """Single-threaded Unix domain socket server wrapping an evaluator."""
 
     def __init__(self, evaluator, socket_path, idle_timeout=600, parent_pid=None,
-                 embedcharge_opts=None):
+                 embedcharge_opts=None, solvent_opts=None, cell=None):
         self.evaluator = evaluator
         self.socket_path = os.path.abspath(socket_path)
         self.idle_timeout = float(idle_timeout)
@@ -228,6 +231,12 @@ class MLIPServer(object):
         # embedcharge_opts: dict with keys xtb_cmd, xtb_acc, xtb_workdir,
         # xtb_keep_files, ncores — or None if embedcharge is disabled.
         self._embedcharge_opts = dict(embedcharge_opts) if embedcharge_opts else None
+        # solvent_opts: dict with keys solvent, solvent_model, xtb_cmd, xtb_acc,
+        # xtb_workdir, xtb_keep_files, ncores — or None if solvent is disabled.
+        self._solvent_opts = dict(solvent_opts) if solvent_opts else None
+        # Cell parameters for PBC: numpy (2,3) [[Lx,Ly,Lz],[a,b,g]] or None.
+        # Set once at server startup (NVT: cell is constant).
+        self._cell = np.asarray(cell, dtype=np.float64).reshape(2, 3) if cell is not None else None
 
         # Persistent xTB worker pool for embedcharge correction.
         self._embedcharge_pool = None
@@ -394,6 +403,13 @@ class MLIPServer(object):
             hessian_mode = str(request.get("hessian_mode", "Analytical"))
             hessian_step = float(request.get("hessian_step", 1.0e-3))
 
+            # Per-step cell from client (NPT), falling back to startup cell (NVT).
+            cell_ang_req = request.get("cell_ang")
+            if cell_ang_req is not None:
+                cell = np.asarray(cell_ang_req, dtype=np.float64).reshape(2, 3)
+            else:
+                cell = self._cell
+
             energy_ev, forces_ev_ang, hess_ev_ang2 = self.evaluator.evaluate(
                 symbols=symbols,
                 coords_ang=coords_ang,
@@ -403,6 +419,7 @@ class MLIPServer(object):
                 need_hessian=need_hessian,
                 hessian_mode=hessian_mode,
                 hessian_step=hessian_step,
+                cell=cell,
             )
 
             # Apply embedcharge correction if MM data is present and enabled.
@@ -463,6 +480,35 @@ class MLIPServer(object):
                             forces_ev_ang = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
                             forces_ev_ang = forces_ev_ang + df_full[:nq, :]
                         forces_mm_ev_ang = df_full[nq:, :]
+
+            # Apply implicit solvent correction if enabled.
+            if self._solvent_opts:
+                try:
+                    from .xtb_alpb_correction import delta_alpb_minus_vac
+                except ImportError:
+                    from xtb_alpb_correction import delta_alpb_minus_vac
+                sopts = self._solvent_opts
+                nq = int(coords_ang.reshape(-1, 3).shape[0])
+                de_solv, df_solv, _ = delta_alpb_minus_vac(
+                    symbols=symbols,
+                    coords_ang=coords_ang,
+                    charge=charge,
+                    multiplicity=multiplicity,
+                    solvent=str(sopts["solvent"]),
+                    need_forces=need_forces,
+                    need_hessian=False,
+                    solvent_model=str(sopts.get("solvent_model", "alpb")),
+                    xtb_cmd=str(sopts.get("xtb_cmd", "xtb")),
+                    xtb_acc=float(sopts.get("xtb_acc", 0.2)),
+                    xtb_workdir=str(sopts.get("xtb_workdir", "tmp")),
+                    xtb_keep_files=bool(sopts.get("xtb_keep_files", False)),
+                    ncores=int(sopts.get("ncores", 4)),
+                )
+                energy_ev = float(energy_ev) + float(de_solv)
+                if df_solv is not None and forces_ev_ang is not None:
+                    forces_ev_ang = np.asarray(forces_ev_ang, dtype=np.float64).reshape(nq, 3)
+                    df_solv = np.asarray(df_solv, dtype=np.float64).reshape(nq, 3)
+                    forces_ev_ang = forces_ev_ang + df_solv
 
             resp = {
                 "status": "ok",

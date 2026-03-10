@@ -10,6 +10,7 @@
  *     AMBER_MLIPS_SERVER_SOCKET  path to Unix domain socket
  *     AMBER_MLIPS_BACKEND        backend name (informational)
  *     AMBER_MLIPS_ML_KEYWORDS    ml_keywords string (checked for --embedcharge)
+ *     AMBER_MLIPS_CELL_FILE      path to AMBER restart file (for NPT cell updates)
  *
  * Wire protocol: 4-byte big-endian length prefix + payload.
  *   Payload format auto-detected by first byte:
@@ -36,10 +37,9 @@
 /* force (eV/Å) → gradient (Eh/Bohr) = -HARTREE_PER_EV / BOHR_PER_ANG */
 #define GRAD_FACTOR      (-(HARTREE_PER_EV) / (BOHR_PER_ANG))
 
-#define MAX_ATOMS   8192
-#define MAX_MM     65536
 #define MAX_JSON   (64 * 1024 * 1024)   /* 64 MB */
 #define LINE_BUF    4096
+#define INIT_CAP    1024   /* initial capacity for growing arrays */
 
 /* ------------------------------------------------------------------ */
 /* QM atom                                                            */
@@ -105,16 +105,27 @@ static const char *json_parse_string(const char **pp) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Parse Q-Chem input                                                 */
+/* Parse Q-Chem input (dynamic allocation)                            */
 /* ------------------------------------------------------------------ */
 static int parse_qchem_input(
     const char *inpfile,
     int *charge, int *spinmult,
-    QMAtom *qm, int *nqm,
-    double mm_coords[][3], double *mm_charges, int *nmm
+    QMAtom **qm_out, int *nqm,
+    double (**mm_coords_out)[3], double **mm_charges_out, int *nmm
 ) {
     FILE *fp = fopen(inpfile, "r");
     if (!fp) { fprintf(stderr, "[c-shim] Cannot open %s: %s\n", inpfile, strerror(errno)); return -1; }
+
+    /* Growing arrays */
+    int cap_qm = INIT_CAP, cap_mm = INIT_CAP;
+    QMAtom *qm = (QMAtom *)malloc((size_t)cap_qm * sizeof(QMAtom));
+    double (*mm_coords)[3] = (double (*)[3])malloc((size_t)cap_mm * sizeof(double[3]));
+    double *mm_charges = (double *)malloc((size_t)cap_mm * sizeof(double));
+    if (!qm || !mm_coords || !mm_charges) {
+        fprintf(stderr, "[c-shim] malloc failed in parse_qchem_input\n");
+        free(qm); free(mm_coords); free(mm_charges);
+        fclose(fp); return -1;
+    }
 
     char line[LINE_BUF];
     int in_molecule = 0, in_extchg = 0, mol_header_read = 0;
@@ -162,13 +173,20 @@ static int parse_qchem_input(
                 /* First line: charge multiplicity */
                 if (sscanf(p, "%d %d", charge, spinmult) < 2) {
                     fprintf(stderr, "[c-shim] Failed to parse charge/mult from: %s\n", p);
+                    free(qm); free(mm_coords); free(mm_charges);
                     fclose(fp); return -1;
                 }
                 mol_header_read = 1;
                 continue;
             }
             /* Atom line: sym x y z */
-            if (*nqm >= MAX_ATOMS) { fprintf(stderr, "[c-shim] Too many QM atoms\n"); fclose(fp); return -1; }
+            if (*nqm >= cap_qm) {
+                cap_qm *= 2;
+                QMAtom *tmp = (QMAtom *)realloc(qm, (size_t)cap_qm * sizeof(QMAtom));
+                if (!tmp) { fprintf(stderr, "[c-shim] realloc failed (QM)\n");
+                    free(qm); free(mm_coords); free(mm_charges); fclose(fp); return -1; }
+                qm = tmp;
+            }
             char sym[8];
             double x, y, z;
             if (sscanf(p, "%7s %lf %lf %lf", sym, &x, &y, &z) == 4) {
@@ -188,7 +206,16 @@ static int parse_qchem_input(
         }
 
         if (in_extchg) {
-            if (*nmm >= MAX_MM) { fprintf(stderr, "[c-shim] Too many MM atoms\n"); fclose(fp); return -1; }
+            if (*nmm >= cap_mm) {
+                cap_mm *= 2;
+                double (*tmp_c)[3] = (double (*)[3])realloc(mm_coords, (size_t)cap_mm * sizeof(double[3]));
+                double *tmp_q = (double *)realloc(mm_charges, (size_t)cap_mm * sizeof(double));
+                if (!tmp_c || !tmp_q) { fprintf(stderr, "[c-shim] realloc failed (MM)\n");
+                    free(qm); free(tmp_c ? (void*)tmp_c : (void*)mm_coords);
+                    free(tmp_q ? (void*)tmp_q : (void*)mm_charges); fclose(fp); return -1; }
+                mm_coords = tmp_c;
+                mm_charges = tmp_q;
+            }
             double x, y, z, q;
             if (sscanf(p, "%lf %lf %lf %lf", &x, &y, &z, &q) == 4) {
                 mm_coords[*nmm][0] = x;
@@ -202,7 +229,54 @@ static int parse_qchem_input(
     }
     fclose(fp);
 
-    if (*nqm == 0) { fprintf(stderr, "[c-shim] No QM atoms found in %s\n", inpfile); return -1; }
+    if (*nqm == 0) {
+        fprintf(stderr, "[c-shim] No QM atoms found in %s\n", inpfile);
+        free(qm); free(mm_coords); free(mm_charges);
+        return -1;
+    }
+
+    *qm_out = qm;
+    *mm_coords_out = mm_coords;
+    *mm_charges_out = mm_charges;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Read cell (box) from AMBER restart file                            */
+/* ------------------------------------------------------------------ */
+
+/* Read cell parameters from the last line of an AMBER restart file.
+ * Returns 0 on success (cell_out filled with Lx,Ly,Lz,alpha,beta,gamma),
+ * -1 on failure (file missing, no box line, parse error). */
+static int read_cell_from_restart(const char *path, double cell_out[6]) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) return -1;
+
+    char last_line[LINE_BUF] = {0};
+    char line[LINE_BUF];
+    while (fgets(line, sizeof(line), fp)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '\0' && *p != '\n' && *p != '\r') {
+            memcpy(last_line, line, sizeof(last_line) - 1);
+            last_line[sizeof(last_line) - 1] = '\0';
+        }
+    }
+    fclose(fp);
+
+    if (last_line[0] == '\0') return -1;
+
+    double a, b, c, al, be, ga;
+    if (sscanf(last_line, "%lf %lf %lf %lf %lf %lf", &a, &b, &c, &al, &be, &ga) != 6)
+        return -1;
+
+    /* Sanity: lengths must be positive, no NaN/Inf */
+    if (a <= 0.0 || b <= 0.0 || c <= 0.0) return -1;
+    if (!isfinite(a) || !isfinite(b) || !isfinite(c) ||
+        !isfinite(al) || !isfinite(be) || !isfinite(ga)) return -1;
+
+    cell_out[0] = a;  cell_out[1] = b;   cell_out[2] = c;
+    cell_out[3] = al; cell_out[4] = be;  cell_out[5] = ga;
     return 0;
 }
 
@@ -347,7 +421,8 @@ static int send_request_bin(
     int fd,
     const QMAtom *qm, int nqm,
     int charge, int spinmult,
-    const double mm_coords[][3], const double *mm_charges, int nmm
+    const double mm_coords[][3], const double *mm_charges, int nmm,
+    const double *cell_ang   /* NULL or double[6]: Lx,Ly,Lz,alpha,beta,gamma */
 ) {
     /* 1) Build JSON metadata (small: symbols + scalars + _bin descriptor) */
     size_t cap = (size_t)(nqm * 10 + 512);
@@ -373,6 +448,9 @@ static int send_request_bin(
             ",\"mm_coords_ang\":[%d,3],\"mm_charges\":[%d]",
             nmm, nmm);
     }
+    if (cell_ang) {
+        off += snprintf(meta + off, cap - off, ",\"cell_ang\":[2,3]");
+    }
     off += snprintf(meta + off, cap - off, "}}");
 
     uint32_t json_len = (uint32_t)off;
@@ -381,7 +459,8 @@ static int send_request_bin(
     size_t coords_bytes = (size_t)nqm * 3 * sizeof(double);
     size_t mm_coords_bytes = (nmm > 0) ? (size_t)nmm * 3 * sizeof(double) : 0;
     size_t mm_charges_bytes = (nmm > 0) ? (size_t)nmm * sizeof(double) : 0;
-    size_t array_total = coords_bytes + mm_coords_bytes + mm_charges_bytes;
+    size_t cell_bytes = cell_ang ? 6 * sizeof(double) : 0;
+    size_t array_total = coords_bytes + mm_coords_bytes + mm_charges_bytes + cell_bytes;
 
     /* 3) Assemble binary payload: magic(1) + json_len(4) + json + arrays */
     size_t payload_len = 1 + 4 + json_len + array_total;
@@ -408,6 +487,10 @@ static int send_request_bin(
     /* Pack mm_charges */
     if (nmm > 0 && mm_charges_bytes > 0) {
         memcpy(payload + p, mm_charges, mm_charges_bytes); p += mm_charges_bytes;
+    }
+    /* Pack cell_ang (NPT: per-step cell from restart file) */
+    if (cell_ang && cell_bytes > 0) {
+        memcpy(payload + p, cell_ang, cell_bytes); p += cell_bytes;
     }
 
     /* 4) Send: [4-byte total length][payload] */
@@ -468,7 +551,12 @@ static int recv_and_parse_response(
         *energy_ev = json_parse_number(&ep);
 
         /* Read binary arrays from after JSON portion.
-         * Order matches _bin descriptor: forces_ev_ang, then forces_mm_ev_ang (if present). */
+         * IMPORTANT: Arrays are read positionally.  The Python server guarantees
+         * a fixed order via _RESPONSE_ARRAY_ORDER in _send_msg_auto():
+         *   1. forces_ev_ang     (nqm x 3)
+         *   2. hessian_ev_ang2   (3N x 3N, if requested — currently never for MD)
+         *   3. forces_mm_ev_ang  (nmm x 3, if embedcharge)
+         */
         size_t data_off = 5 + jlen;
         size_t f_bytes = (size_t)nqm * 3 * sizeof(double);
         if (data_off + f_bytes <= len) {
@@ -479,7 +567,7 @@ static int recv_and_parse_response(
             memset(forces_ev_ang, 0, f_bytes);
         }
 
-        if (nmm > 0) {
+        if (nmm > 0 && forces_mm_ev_ang) {
             size_t fm_bytes = (size_t)nmm * 3 * sizeof(double);
             if (data_off + fm_bytes <= len) {
                 memcpy(forces_mm_ev_ang, buf + data_off, fm_bytes);
@@ -538,7 +626,7 @@ static int recv_and_parse_response(
         }
 
         /* Parse forces_mm_ev_ang */
-        if (nmm > 0) {
+        if (nmm > 0 && forces_mm_ev_ang) {
             memset(forces_mm_ev_ang, 0, sizeof(double) * 3 * nmm);
             const char *mp2 = json_find_key(buf, "forces_mm_ev_ang");
             if (mp2 && *mp2 == '[') {
@@ -570,10 +658,11 @@ static int evaluate_via_server(
     const QMAtom *qm, int nqm,
     int charge, int spinmult,
     const double mm_coords[][3], const double *mm_charges, int nmm,
-    double *energy_ev,               /* out */
-    double forces_ev_ang[][3],       /* out: nqm x 3 */
-    double forces_mm_ev_ang[][3],    /* out: nmm x 3, may be zero */
-    int *ok                          /* out: 1=success */
+    const double *cell_ang,              /* NULL or double[6] for NPT */
+    double *energy_ev,                   /* out */
+    double forces_ev_ang[][3],           /* out: nqm x 3 */
+    double forces_mm_ev_ang[][3],        /* out: nmm x 3, may be NULL */
+    int *ok                              /* out: 1=success */
 ) {
     *ok = 0;
 
@@ -582,6 +671,11 @@ static int evaluate_via_server(
     if (fd < 0) { fprintf(stderr, "[c-shim] socket: %s\n", strerror(errno)); return -1; }
 
     struct sockaddr_un addr;
+    if (strlen(socket_path) >= sizeof(addr.sun_path)) {
+        fprintf(stderr, "[c-shim] socket path too long (%zu >= %zu): %s\n",
+                strlen(socket_path), sizeof(addr.sun_path), socket_path);
+        close(fd); return -1;
+    }
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
@@ -592,7 +686,7 @@ static int evaluate_via_server(
     }
 
     /* Send binary request */
-    if (send_request_bin(fd, qm, nqm, charge, spinmult, mm_coords, mm_charges, nmm) != 0) {
+    if (send_request_bin(fd, qm, nqm, charge, spinmult, mm_coords, mm_charges, nmm, cell_ang) != 0) {
         fprintf(stderr, "[c-shim] send failed\n");
         close(fd); return -1;
     }
@@ -656,6 +750,7 @@ int main(int argc, char *argv[]) {
     const char *inpfile = argv[1];
     const char *logfile = argv[2];
     const char *savfile = argv[3];
+    int ret = 1;
 
     const char *socket_path = getenv("AMBER_MLIPS_SERVER_SOCKET");
     if (!socket_path || !socket_path[0]) {
@@ -663,30 +758,51 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Parse Q-Chem input */
-    static QMAtom qm[MAX_ATOMS];
-    static double mm_coords[MAX_MM][3];
-    static double mm_charges[MAX_MM];
+    /* Parse Q-Chem input (dynamically allocated) */
+    QMAtom *qm = NULL;
+    double (*mm_coords)[3] = NULL;
+    double *mm_charges = NULL;
     int nqm = 0, nmm = 0, charge = 0, spinmult = 1;
 
-    if (parse_qchem_input(inpfile, &charge, &spinmult, qm, &nqm, mm_coords, mm_charges, &nmm) != 0)
+    if (parse_qchem_input(inpfile, &charge, &spinmult,
+                          &qm, &nqm, &mm_coords, &mm_charges, &nmm) != 0)
         return 1;
+
+    /* Allocate output arrays */
+    double (*forces_ev_ang)[3] = (double (*)[3])calloc((size_t)nqm, sizeof(double[3]));
+    double (*forces_mm_ev_ang)[3] = (nmm > 0) ? (double (*)[3])calloc((size_t)nmm, sizeof(double[3])) : NULL;
+    double (*grad_qm)[3] = (double (*)[3])calloc((size_t)nqm, sizeof(double[3]));
+    double (*efield_mm)[3] = (nmm > 0) ? (double (*)[3])calloc((size_t)nmm, sizeof(double[3])) : NULL;
+
+    if (!forces_ev_ang || !grad_qm || (nmm > 0 && (!forces_mm_ev_ang || !efield_mm))) {
+        fprintf(stderr, "[c-shim] malloc failed for output arrays\n");
+        goto cleanup;
+    }
+
+    /* Read cell from AMBER restart file for NPT support.
+     * If AMBER_MLIPS_CELL_FILE is set and the file has a valid box line,
+     * cell_ang is sent to the server.  Otherwise NULL (server uses startup cell). */
+    const char *cell_file = getenv("AMBER_MLIPS_CELL_FILE");
+    double cell_buf[6];
+    const double *cell_ang = NULL;
+    if (cell_file && cell_file[0]) {
+        if (read_cell_from_restart(cell_file, cell_buf) == 0)
+            cell_ang = cell_buf;
+    }
 
     /* Evaluate via server (MM data included for server-side embedcharge) */
     double energy_ev = 0.0;
-    static double forces_ev_ang[MAX_ATOMS][3];
-    static double forces_mm_ev_ang[MAX_MM][3];
     int ok = 0;
 
     if (evaluate_via_server(socket_path, qm, nqm, charge, spinmult,
-                            mm_coords, mm_charges, nmm,
+                            (const double (*)[3])mm_coords, mm_charges, nmm,
+                            cell_ang,
                             &energy_ev, forces_ev_ang, forces_mm_ev_ang, &ok) != 0 || !ok)
-        return 1;
+        goto cleanup;
 
     /* Convert units: eV → Eh, eV/Å → Eh/Bohr (gradient = -force * factor) */
     double energy_ha = energy_ev * HARTREE_PER_EV;
 
-    static double grad_qm[MAX_ATOMS][3];
     for (int i = 0; i < nqm; i++) {
         grad_qm[i][0] = forces_ev_ang[i][0] * GRAD_FACTOR;
         grad_qm[i][1] = forces_ev_ang[i][1] * GRAD_FACTOR;
@@ -694,24 +810,35 @@ int main(int argc, char *argv[]) {
     }
 
     /* MM efield: E = -grad / q (AMBER converts back: grad = -E * q) */
-    static double efield_mm[MAX_MM][3];
     for (int i = 0; i < nmm; i++) {
-        double grad_x = forces_mm_ev_ang[i][0] * GRAD_FACTOR;
-        double grad_y = forces_mm_ev_ang[i][1] * GRAD_FACTOR;
-        double grad_z = forces_mm_ev_ang[i][2] * GRAD_FACTOR;
+        double gx = forces_mm_ev_ang[i][0] * GRAD_FACTOR;
+        double gy = forces_mm_ev_ang[i][1] * GRAD_FACTOR;
+        double gz = forces_mm_ev_ang[i][2] * GRAD_FACTOR;
         double q = mm_charges[i];
         if (fabs(q) > 1.0e-14) {
-            efield_mm[i][0] = -grad_x / q;
-            efield_mm[i][1] = -grad_y / q;
-            efield_mm[i][2] = -grad_z / q;
+            efield_mm[i][0] = -gx / q;
+            efield_mm[i][1] = -gy / q;
+            efield_mm[i][2] = -gz / q;
         } else {
             efield_mm[i][0] = efield_mm[i][1] = efield_mm[i][2] = 0.0;
         }
     }
 
     /* Write outputs */
-    if (write_outputs(logfile, savfile, energy_ha, efield_mm, nmm, grad_qm, nqm) != 0)
-        return 1;
+    if (write_outputs(logfile, savfile, energy_ha,
+                      (const double (*)[3])efield_mm, nmm,
+                      (const double (*)[3])grad_qm, nqm) != 0)
+        goto cleanup;
 
-    return 0;
+    ret = 0;
+
+cleanup:
+    free(qm);
+    free(mm_coords);
+    free(mm_charges);
+    free(forces_ev_ang);
+    free(forces_mm_ev_ang);
+    free(grad_qm);
+    free(efield_mm);
+    return ret;
 }

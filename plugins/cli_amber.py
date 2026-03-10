@@ -30,6 +30,49 @@ from .mdin_transform import InputTransformError, transform_mdin_text
 from .mlip_server import MLIPServer, ensure_server, send_shutdown, server_is_alive
 
 
+def _read_cell_from_rst7(path):
+    """Read cell lengths and angles from an AMBER restart/coordinate file.
+
+    Supports both NetCDF (binary) and ASCII rst7 formats.
+    Returns "Lx,Ly,Lz,alpha,beta,gamma" string, or None if no cell info.
+    """
+    # Try NetCDF first (most common for modern AMBER).
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(3)
+        if magic == b"CDF":
+            from scipy.io import netcdf_file
+
+            with netcdf_file(path, "r", mmap=False) as nc:
+                if "cell_lengths" in nc.variables and "cell_angles" in nc.variables:
+                    lengths = nc.variables["cell_lengths"].data.copy()
+                    angles = nc.variables["cell_angles"].data.copy()
+                    return "{},{},{},{},{},{}".format(
+                        lengths[0], lengths[1], lengths[2],
+                        angles[0], angles[1], angles[2],
+                    )
+            return None
+    except Exception:
+        pass
+
+    # ASCII rst7: last line may have box info (6 floats: Lx Ly Lz a b g).
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+        if not lines:
+            return None
+        last = lines[-1].split()
+        if len(last) == 6:
+            vals = [float(v) for v in last]
+            # Sanity: lengths should be positive.
+            if all(v > 0 for v in vals[:3]):
+                return "{},{},{},{},{},{}".format(*vals)
+    except Exception:
+        pass
+
+    return None
+
+
 class AmberMLIPSError(RuntimeError):
     """Raised for wrapper-level runtime failures."""
 
@@ -147,6 +190,28 @@ def _extract_input_arg(argv):
     raise AmberMLIPSError(
         "amber-mlips requires -i <mdin> so the wrapper can transform &qmmm."
     )
+
+
+def _extract_coord_path(argv):
+    """Extract the -c <coordinate/restart> path from forwarded sander args."""
+    for i, token in enumerate(argv):
+        if token == "-c":
+            if i + 1 < len(argv):
+                return argv[i + 1]
+        elif token.startswith("-c") and len(token) > 2:
+            return token[2:]
+    return None
+
+
+def _extract_restart_path(argv):
+    """Extract the -r <restart output> path from forwarded sander args."""
+    for i, token in enumerate(argv):
+        if token == "-r":
+            if i + 1 < len(argv):
+                return argv[i + 1]
+        elif token.startswith("-r") and len(token) > 2:
+            return token[2:]
+    return None
 
 
 def _replace_input_path(argv, input_ref, new_path):
@@ -317,6 +382,7 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
         "AMBER_MLIPS_BACKEND",
         "AMBER_MLIPS_ML_KEYWORDS",
         "AMBER_MLIPS_SERVER_SOCKET",
+        "AMBER_MLIPS_CELL_FILE",
     ):
         prefix.extend(["-x", key])
 
@@ -325,7 +391,7 @@ def _build_launch_spec(mm_ranks, mpi_bin_opt):
 
 def _compute_server_socket(backend, ml_keywords):
     """Deterministic socket path scoped to this process."""
-    key = "amber_mlips_{}_{}_{}_{}".format(backend, ml_keywords, os.getpid(), id(time))
+    key = "amber_mlips_{}_{}_{}_{}".format(backend, ml_keywords, os.getpid(), time.time())
     h = hashlib.md5(key.encode()).hexdigest()[:12]
     uid = os.getuid()
     return os.path.join(
@@ -334,7 +400,7 @@ def _compute_server_socket(backend, ml_keywords):
     )
 
 
-def _start_model_server(stack, backend, ml_keywords, debug=False):
+def _start_model_server(stack, backend, ml_keywords, debug=False, cell_str=None):
     """Start persistent MLIP model server and return socket path."""
     socket_path = _compute_server_socket(backend, ml_keywords)
 
@@ -346,6 +412,8 @@ def _start_model_server(stack, backend, ml_keywords, debug=False):
         "--server-socket", socket_path,
         "--server-parent-pid", str(os.getpid()),
     ]
+    if cell_str:
+        cmd.extend(["--server-cell", cell_str])
     if debug:
         cmd.append("--debug")
 
@@ -398,7 +466,8 @@ def _start_model_server(stack, backend, ml_keywords, debug=False):
     )
 
 
-def _build_child_env(base_env, shim_dir, backend, ml_keywords, server_socket, debug=False):
+def _build_child_env(base_env, shim_dir, backend, ml_keywords, server_socket,
+                     debug=False, cell_file=None):
     env = dict(base_env)
     env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
     env["AMBER_MLIPS_BACKEND"] = str(backend)
@@ -408,6 +477,8 @@ def _build_child_env(base_env, shim_dir, backend, ml_keywords, server_socket, de
         env["AMBER_MLIPS_DEBUG"] = "1"
     else:
         env.pop("AMBER_MLIPS_DEBUG", None)
+    if cell_file:
+        env["AMBER_MLIPS_CELL_FILE"] = str(cell_file)
     return env
 
 
@@ -526,13 +597,30 @@ def main(argv=None):
             # Use fast C shim (embedcharge correction is handled server-side).
             shim_dir, qchem_path = _stage_qchem_shim(stack, use_c_shim=True)
 
-            # Start persistent model server (loads model once).
+            # Read cell info from coordinate file for PBC support.
+            cell_str = None
+            coord_path = _extract_coord_path(forward)
+            if coord_path and os.path.isfile(coord_path):
+                cell_str = _read_cell_from_rst7(coord_path)
+                if cell_str and ns.debug:
+                    print("[amber-mlips] cell from {}: {}".format(coord_path, cell_str),
+                          file=sys.stderr, flush=True)
+
+            # Start persistent model server (loads model once, with cell if PBC).
             server_socket = _start_model_server(
                 stack=stack,
                 backend=transformed.backend,
                 ml_keywords=transformed.ml_keywords,
                 debug=bool(ns.debug),
+                cell_str=cell_str,
             )
+
+            # For NPT: pass restart file path so C shim can read updated cell each step.
+            cell_file_for_shim = None
+            if cell_str:
+                restart_path = _extract_restart_path(forward)
+                if restart_path:
+                    cell_file_for_shim = os.path.abspath(restart_path)
 
             child_env = _build_child_env(
                 base_env=base_env,
@@ -541,6 +629,7 @@ def main(argv=None):
                 ml_keywords=transformed.ml_keywords,
                 server_socket=server_socket,
                 debug=bool(ns.debug),
+                cell_file=cell_file_for_shim,
             )
 
             forward_exec = _replace_input_path(forward, input_ref, transformed_path)
