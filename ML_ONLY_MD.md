@@ -21,11 +21,11 @@ For solvated systems with periodic boundary conditions, cell dimensions are auto
   qmcharge=0, spin=1,
   qm_theory='uma',
   ml_keywords='--model uma-s-1p1 --uma-task omat',
-  qmshake=0, qmcut=0.0,
+  qmshake=0, qmcut=3.0,
  /
 ```
 
-Key settings: `ntb=1` (NVT), `ntc=1,ntf=1` (no SHAKE), `qmmask='@*'` (all atoms as QM → pure ML MD), `cut=3.0` (dummy small value; MM cutoff unused), `qmcut=0.0`, `--uma-task omat` (PBC-aware model).
+Key settings: `ntb=1` (NVT), `ntc=1,ntf=1` (no SHAKE), `qmmask='@*'` (all atoms as QM → pure ML MD), `cut=3.0, qmcut=3.0` (must match; sander checks QM region + qmcut < box), `--uma-task omat` (PBC-aware model).
 
 ## PBC (Periodic Boundary, NPT)
 
@@ -51,7 +51,7 @@ Two additional settings are **required**:
   qmcharge=0, spin=1,
   qm_theory='uma',
   ml_keywords='--model uma-s-1p1 --uma-task omat',
-  qmshake=0, qmcut=0.0,
+  qmshake=0, qmcut=3.0,
  /
 ```
 

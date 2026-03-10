@@ -30,5 +30,5 @@ ML-only NPT MD with UMA (all atoms computed by MLIP, constant pressure)
   qm_theory='uma',   ! MLIP backend
   ml_keywords='--model uma-s-1p1 --uma-task omat', ! PBC-aware model (omat task)
   qmshake=0,         ! No SHAKE on ML atoms (=all atoms)
-  qmcut=0.0,         ! No QM/MM cutoff (all atoms are QM)
+  qmcut=3.0,         ! Must match cut (sander PBC check; all atoms are QM)
  /
