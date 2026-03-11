@@ -30,7 +30,24 @@ The conda package includes `sander`, `sander.MPI` (OpenMPI), and requires Python
 ```bash
 conda install xtb "libblas=*=*openblas" "liblapack=*=*openblas"
 ```
-The `libblas`/`liblapack` specs prevent the BLAS library from being replaced with the slower netlib. See [TECHNICAL_NOTE.md](TECHNICAL_NOTE.md#conda-blas-performance) for details. You can also [build xTB from source](https://github.com/grimme-lab/xtb).
+The `libblas`/`liblapack` specs prevent the BLAS library from being replaced with the slower netlib. See [TECHNICAL_NOTE.md](TECHNICAL_NOTE.md#conda-blas-performance) for details.
+
+To build xTB from source (required for CPCM-X solvation via `--solvent-model cpcmx`):
+```bash
+git clone --depth 1 https://github.com/grimme-lab/xtb.git
+cd xtb
+cmake -B build -S . \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DWITH_CPCMX=ON \
+  -DBLAS_LIBRARIES=/path/to/libblas.so \
+  -DLAPACK_LIBRARIES=/path/to/liblapack.so
+make -C build tblite-lib -j8   # build tblite first to avoid a parallel build race
+make -C build xtb-exe -j8
+```
+The built binary is at `build/xtb`. Add it to your `PATH` or use `--xtb-cmd /path/to/build/xtb`.
+For CPCM-X, set `CPXHOME` to the CPCM-X source directory (e.g., `build/_deps/cpcmx-src/`).
+Requires GCC >= 10 (gfortran 8 causes internal compiler errors).
+See also: https://github.com/grimme-lab/xtb, https://github.com/grimme-lab/CPCM-X
 
 2. Install PyTorch suitable for your CUDA environment.
 ```bash
