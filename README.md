@@ -118,7 +118,7 @@ This computes `dE = E_xTB(embed) - E_xTB(no-embed)` and adds the correction to M
 
 ## ML-Only MD (Full-System MLIP)
 
-See [`ML_ONLY_MD.md`](ML_ONLY_MD.md) for full-system MLIP molecular dynamics (`qmmask='@*'`) with implicit solvent (non-periodic only).
+See the [ML-Only MD section in OPTIONS.md](OPTIONS.md#ml-only-md-full-system-mlip) for full-system MLIP molecular dynamics (`qmmask='@*'`) with implicit solvent (non-periodic only).
 
 ## MM MPI Parallelism
 

@@ -60,9 +60,13 @@ On launch, `amber-mlips` transforms the input:
 
 When `--embedcharge` or `--solvent` is enabled, xTB must be available in the current environment/path.
 
-### ML-Only MD
+### ML-Only MD (Full-System MLIP)
 
-Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Non-periodic only (`ntb=0`).
+Set `qmmask='@*'` to make **all atoms QM**, yielding pure ML molecular dynamics with no MM force field.
+AMBER still needs a parm7 topology file, but all MM forces are replaced by MLIP forces.
+
+> **Note:** ML-only MD is supported only for **non-periodic** systems (`ntb=0`).
+> PBC ML-only is not supported due to sander's `QM_CHECK_PERIODIC` limitation.
 
 | Setting | Value | Reason |
 |---------|-------|--------|
@@ -72,6 +76,57 @@ Set `qmmask='@*'` to compute all atoms with MLIP (no MM). Non-periodic only (`nt
 | `ntc`, `ntf` | `1`, `1` | No SHAKE constraints |
 | `qmshake` | `0` | No SHAKE on QM atoms |
 | `qmcut` | `0.0` | No QM/MM cutoff |
+
+Two modes are available:
+
+| Mode | Solvent | `ml_keywords` |
+|------|---------|---------------|
+| Gas phase | None | `--model uma-s-1p1` |
+| Implicit solvent | xTB ALPB/CPCMX | `--model uma-s-1p1 --solvent water --solvent-model alpb` |
+
+#### Gas Phase Example
+
+```text
+ &cntrl
+  imin=0, irest=0, ntx=1,
+  dt=0.001, nstlim=1000,
+  ntc=1, ntf=1,
+  cut=999.0, ntb=0, ntp=0,
+  ntt=3, gamma_ln=5.0, temp0=300.0,
+  iwrap=0, ifqnt=1,
+ /
+ &qmmm
+  qmmask='@*',
+  qmcharge=0, spin=1,
+  qm_theory='uma',
+  ml_keywords='--model uma-s-1p1',
+  qmshake=0, qmcut=0.0,
+ /
+```
+
+#### Implicit Solvent Example
+
+Uses xTB ALPB correction: `dE = E_xTB(solv) - E_xTB(vac)` added to MLIP energy and forces.
+
+```text
+ &cntrl
+  imin=0, irest=0, ntx=1,
+  dt=0.001, nstlim=1000,
+  ntc=1, ntf=1,
+  cut=999.0, ntb=0, ntp=0,
+  ntt=3, gamma_ln=5.0, temp0=300.0,
+  iwrap=0, ifqnt=1,
+ /
+ &qmmm
+  qmmask='@*',
+  qmcharge=0, spin=1,
+  qm_theory='uma',
+  ml_keywords='--model uma-s-1p1 --solvent water --solvent-model alpb',
+  qmshake=0, qmcut=0.0,
+ /
+```
+
+Available solvents: water, methanol, ethanol, acetonitrile, dmso, dmf, thf, benzene, toluene, hexane, etc. (all xTB ALPB-supported solvents).
 
 ## UMA Options
 
