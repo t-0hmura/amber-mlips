@@ -1,5 +1,5 @@
 # amber-mlips
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19197776.svg)](https://doi.org/10.5281/zenodo.19197776)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18871122.svg)](https://doi.org/10.5281/zenodo.18871122)
 
 MLIP (Machine Learning Interatomic Potential) wrapper for **AMBER QM/MM** via `sander` `EXTERN` interface.
 
@@ -49,9 +49,9 @@ For CPCM-X, set `CPXHOME` to the CPCM-X source directory (e.g., `build/_deps/cpc
 Requires GCC >= 10 (gfortran 8 causes internal compiler errors).
 See also: https://github.com/grimme-lab/xtb, https://github.com/grimme-lab/CPCM-X
 
-2. Install PyTorch suitable for your CUDA environment.
+2. Install PyTorch suitable for your CUDA environment (CUDA 13.0 recommended).
 ```bash
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu130
 ```
 
 3. Install the package with the UMA backend. For ORB/MACE/AIMNet2, replace `uma` accordingly.
@@ -61,7 +61,7 @@ pip install "amber-mlips[uma]"
 
 4. Log in to Hugging Face for UMA model access. (Not required for ORB/MACE/AIMNet2)
 ```bash
-huggingface-cli login
+hf auth login
 ```
 > UMA model is on Hugging Face Hub. You need to log in once (See https://github.com/facebookresearch/fairchem):
 
@@ -134,7 +134,23 @@ amber-mlips --mm-ranks 16 -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7 -r 
 > **Note:** AMBER 24 (and earlier) has a bug in `qm2_extern_module.F90` that corrupts forces in multi-rank EXTERN runs. Use **AmberTools 25** or later for `--mm-ranks > 1`.  
 > Also place `--mm-ranks` between `amber-mlips` and `-O` (e.g., `amber-mlips --mm-ranks 16 -O ...`).
 
+## Local Model Weights
+
+Use `-w` / `--weights-file` on the wrapper command, or inside `ml_keywords`:
+
+```bash
+amber-mlips --weights-file uma.pt -O -i mlmm.in -o mlmm.out -p leap.parm7 -c md.rst7
+```
+
+```text
+ml_keywords='--model orb-v3-conservative-omol --weights-file orb.ckpt',
+```
+
+The option works with UMA, ORB, MACE, and AIMNet2. For ORB, `--model` selects the architecture and `--weights-file` supplies its weights. Local weights bypass automatic checkpoint downloads. If both locations specify weights, they must name the same file.
+
 ## Installing Model Families
+
+Use Python 3.12 or newer for current ORB releases.
 
 ```bash
 pip install "amber-mlips[uma]"         # UMA (default)
@@ -144,7 +160,7 @@ pip install "amber-mlips[aimnet2]"     # AIMNet2
 pip install amber-mlips                # core only (no ML backend)
 ```
 
-> **Note:** UMA and MACE have a dependency conflict (`e3nn`). Use separate environments.
+> **Note:** UMA conflicts with MACE (`e3nn`) and ORB (`nvalchemi-toolkit-ops`) in the current upstream releases. Install UMA in its own environment.
 
 Local install:
 ```bash
@@ -154,7 +170,7 @@ pip install -e ".[uma]"
 ```
 
 Model download notes:
-- **UMA**: Hosted on Hugging Face Hub. Run `huggingface-cli login` once.
+- **UMA**: Hosted on Hugging Face Hub. Run `hf auth login` once.
 - **ORB / MACE / AIMNet2**: Downloaded automatically on first use.
 
 ## Examples
@@ -170,7 +186,7 @@ Ready-to-run examples are in the [`examples/`](examples/) directory with a prote
 | `uma_embedcharge.in` | UMA | `uma-s-1p1` + xTB embedcharge |
 | `uma_mlonly_implicit.in` | UMA | ML-only + xTB implicit solvent (non-periodic, ALPB) |
 
-UMA, ORB, and AIMNet2 can share one environment; MACE requires a separate one (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend:
+Install UMA in a separate environment from ORB and MACE (see [Installing Model Families](#installing-model-families)). Run the example matching your installed backend:
 ```bash
 cd examples
 amber-mlips --mm-ranks 16 -O -i uma.in -o uma.out -p leap.parm7 -c md.rst7 -r uma.rst7
@@ -204,11 +220,13 @@ Environment: AMD Ryzen 7950X3D / 4.20 GHz (32 threads) + RTX 5080 (VRAM 16 GB), 
 See [`OPTIONS.md`](OPTIONS.md) for all wrapper and backend-specific options.
 For internal architecture details, see [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
 
+> **Note:** For ORB and MACE, FP32 runs faster than FP64 and is useful for generating starting geometries for subsequent DFT refinement, but extra imaginary frequencies may remain after the MLIP optimization reports convergence. If you need an MLIP local minimum with no imaginary frequencies or a TS with only its single imaginary mode, we recommend FP64. In `ml_keywords`, set `--orb-precision float64` for ORB or `--mace-default-dtype float64` for MACE.
+
 ## Troubleshooting
 
 - **`amber-mlips` command not found** — Activate the conda/venv environment where the package is installed.
 - **`sander` not found** — Install AmberTools (`conda install ambertools-dac=25`), or use `--sander-bin /path/to/sander`.
-- **UMA model download fails (401/403)** — Run `huggingface-cli login`. Some models require access approval on Hugging Face.
+- **UMA model download fails (401/403)** — Run `hf auth login`. Some models require access approval on Hugging Face.
 - **MPI errors with `--mm-ranks > 1`** — Ensure `mpirun`/`mpiexec` is available. Use `--mpi-bin` to specify explicitly.
 - **Works interactively but fails in batch jobs** — Use `--sander-bin` with an absolute path.
 
@@ -225,9 +243,9 @@ If you use this package, please cite:
   author       = {Ohmura, Takuto},
   title        = {amber-mlips},
   year         = {2026},
-  version      = {1.2.1},
+  version      = {1.3.0},
   url          = {https://github.com/t-0hmura/amber-mlips},
   license      = {MIT},
-  doi          = {10.5281/zenodo.19197776}
+  doi          = {10.5281/zenodo.18871122}
 }
 ```

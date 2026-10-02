@@ -196,6 +196,7 @@ def _parse_qchem_input(inpfile):
 def _build_keyword_parser():
     parser = argparse.ArgumentParser(prog="amber-mlips-qchem-keywords", add_help=False)
     parser.add_argument("--model", default=None, help="Model alias/path.")
+    parser.add_argument("-w", "--weights-file", default=None, help="Path to downloaded model weights.")
     parser.add_argument("--device", default="auto", help="cpu|cuda|auto")
     parser.add_argument("--embedcharge", action="store_true", help="Enable xTB point-charge embedding correction.")
     parser.add_argument("--solvent", default="none", help="xTB implicit-solvent name (e.g. water, methanol). Set 'none' to disable.")
@@ -227,6 +228,10 @@ def _parse_keywords(backend, ml_keywords):
     args, unknown = parser.parse_known_args(tokens)
     if unknown:
         raise QCShimError("Unknown ml_keywords option(s): {}".format(" ".join(unknown)))
+    if args.weights_file is not None:
+        args.weights_file = os.path.abspath(os.path.expanduser(args.weights_file))
+        if not os.path.isfile(args.weights_file):
+            raise QCShimError("Weights file does not exist: {}".format(args.weights_file))
     args.backend = str(backend).strip().lower()
     return args
 
@@ -249,6 +254,7 @@ def _create_evaluator(args):
             radius=None,
             r_edges=False,
             otf_graph=True,
+            weights_file=args.weights_file,
         )
 
     if backend == "orb":
@@ -257,13 +263,14 @@ def _create_evaluator(args):
             device=args.device,
             precision=args.orb_precision,
             compile_model=bool(args.orb_compile),
+            weights_file=args.weights_file,
             loader_kwargs=None,
             calc_kwargs=None,
         )
 
     if backend == "mace":
         return MACEEvaluator(
-            model=model or "MACE-OMOL-0",
+            model=args.weights_file or model or "MACE-OMOL-0",
             device=args.device,
             default_dtype=args.mace_default_dtype,
             calc_kwargs=None,
@@ -271,7 +278,7 @@ def _create_evaluator(args):
 
     if backend == "aimnet2":
         return AIMNet2Evaluator(
-            model=model or "aimnet2",
+            model=args.weights_file or model or "aimnet2",
             device=args.device,
             calc_kwargs=None,
         )

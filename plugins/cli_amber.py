@@ -455,6 +455,7 @@ def build_parser():
         help="Keep transformed mdin as '<input>.amber_mlips.qc.in'.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Transform input and print command, but do not run sander.")
+    parser.add_argument("-w", "--weights-file", default=None, help="Path to downloaded model weights.")
     parser.add_argument("--debug", action="store_true", help="Verbose wrapper/shim logs.")
     parser.add_argument("-h", "--help", action="store_true", help="Show this help message.")
     return parser
@@ -510,6 +511,18 @@ def main(argv=None):
             with open(input_ref.user_path, "r") as handle:
                 original_text = handle.read()
             transformed = transform_mdin_text(original_text)
+            if ns.weights_file is not None:
+                weights_file = os.path.abspath(os.path.expanduser(ns.weights_file))
+                if not os.path.isfile(weights_file):
+                    raise AmberMLIPSError("Weights file does not exist: {}".format(weights_file))
+                weights_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+                weights_parser.add_argument("-w", "--weights-file")
+                configured, _ = weights_parser.parse_known_args(shlex.split(transformed.ml_keywords))
+                if configured.weights_file is not None:
+                    configured_file = os.path.abspath(os.path.expanduser(configured.weights_file))
+                    if configured_file != weights_file:
+                        raise AmberMLIPSError("--weights-file conflicts with ml_keywords.")
+                transformed.ml_keywords += " --weights-file " + shlex.quote(weights_file)
 
             for warn in transformed.warnings:
                 print("[amber-mlips] WARNING: {}".format(warn), file=sys.stderr)

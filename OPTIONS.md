@@ -2,7 +2,7 @@
 
 For most users, defaults are sufficient.
 
-> **Note:** UMA and MACE currently have a dependency conflict (`e3nn`). Use separate environments.
+> **Note:** UMA conflicts with MACE (`e3nn`) and ORB (`nvalchemi-toolkit-ops`) in the current upstream releases. Install UMA in its own environment.
 
 ## Wrapper Options
 
@@ -14,6 +14,7 @@ These are consumed by the `amber-mlips` command; all other flags are forwarded t
 | `--mpi-bin <path>` | MPI launcher for `--mm-ranks > 1` (default: auto-detect `mpirun` / `mpiexec`) |
 | `--mm-ranks <int>` | MPI rank count for MM side (default: `1`) |
 | `--keep-transformed-input` | Save transformed mdin as `<input>.amber_mlips.qc.in` for inspection |
+| `-w`, `--weights-file <path>` | Downloaded model weights; also accepted in `ml_keywords` |
 | `--dry-run` | Print resolved command without running `sander` |
 | `--debug` | Verbose wrapper and shim logs |
 | `-h`, `--help` | Print help |
@@ -47,6 +48,7 @@ On launch, `amber-mlips` transforms the input:
 | Option | Description |
 |--------|-------------|
 | `--model <name>` | Model name, alias, or local path |
+| `-w`, `--weights-file <path>` | Downloaded weights file; for ORB, `--model` selects its architecture |
 | `--device auto\|cpu\|cuda` | Compute device (default: `auto`) |
 | `--embedcharge` | Enable xTB point-charge embedding correction |
 | `--solvent <name>` | xTB implicit solvent name (default: `none`). E.g., `water`, `methanol`, `dmso` |
@@ -138,7 +140,7 @@ Available models (default: **`uma-s-1p1`**):
 | `uma-s-1p2` | Small model v1.2, ~50% faster & ~40% more accurate on OMol (6.6M/290M active/total params) |
 | `uma-m-1p1` | Best across all metrics, slower and more memory-intensive (50M/1.4B active/total params) |
 
-Additional `esen-*` variants are also available. Models are hosted on Hugging Face Hub (`huggingface-cli login` required).
+Additional `esen-*` variants are also available. Models are hosted on Hugging Face Hub (`hf auth login` required).
 
 | Option | Description |
 |--------|-------------|
